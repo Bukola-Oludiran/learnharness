@@ -18,6 +18,38 @@ export interface CourseSession {
 	unitIds: string[];
 }
 
+/** One book section a unit draws on — the address read_material takes. */
+export interface UnitSource {
+	materialId: string;
+	sectionId: string;
+}
+
+/**
+ * todo    — not started
+ * active  — a session is teaching it (phase 4c)
+ * covered — taught (phase 4c)
+ * skipped — the learner set it aside
+ */
+export type UnitStatus = "todo" | "active" | "covered" | "skipped";
+
+/** One unit of a course's syllabus: what one study session can teach. */
+export interface SyllabusUnit {
+	id: string;
+	title: string;
+	/** Ids of the units this one comes after. */
+	dependsOn: string[];
+	sources: UnitSource[];
+	status: UnitStatus;
+}
+
+/** The course's long-lived plan, in teaching order. */
+export interface Syllabus {
+	units: SyllabusUnit[];
+	builtAt: string;
+	/** The learner's note to the builder on the last build, if any. */
+	note?: string;
+}
+
 export interface CourseRecord {
 	id: string;
 	title: string;
@@ -26,6 +58,12 @@ export interface CourseRecord {
 	/** Books, notes and tests attached to the course (ingest phase). */
 	materialIds: string[];
 	sessions: CourseSession[];
+	/** Library books the course teaches from (phase 4b). A book is shared:
+	 *  it lives in the library and may serve several courses. */
+	bookIds?: string[];
+	syllabus?: Syllabus;
+	/** Why the last syllabus build failed; cleared by the next build. */
+	syllabusError?: string;
 	createdAt: string;
 	/** Bumped when a session joins — not on title/goal edits, so the
 	 *  sidebar order never churns on an edit (the chat rename rule). */
@@ -47,3 +85,6 @@ export interface CourseSummary {
 export const COURSE_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 export const COURSE_TITLE_MAX = 200;
 export const COURSE_GOAL_MAX = 2000;
+export const MAX_SYLLABUS_UNITS = 60;
+export const UNIT_TITLE_MAX = 200;
+export const SYLLABUS_NOTE_MAX = 1000;

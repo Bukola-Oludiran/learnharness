@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { DumbbellIcon, PlusIcon } from "lucide-react";
 import { CourseFormDialog, DeleteCourseDialog } from "@/components/course-dialogs";
 import { CourseMaterials } from "@/components/course-materials";
+import { CourseSyllabus } from "@/components/course-syllabus";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import { SessionRow } from "@/components/sidebar";
 import { TopBar } from "@/components/top-bar";
@@ -57,9 +58,12 @@ export function CourseHomeBody({
 	onEdit,
 	onDelete,
 	materials,
+	syllabus,
 }: {
 	/** The Materials section (its own data and events); a slot so this body stays pure. */
 	materials?: React.ReactNode;
+	/** The Books and Syllabus sections, likewise. */
+	syllabus?: React.ReactNode;
 	course: CourseRecord;
 	/** null while the session list loads. */
 	chats: ChatListItem[] | null;
@@ -110,6 +114,8 @@ export function CourseHomeBody({
 					</button>
 				</div>
 			</section>
+
+			{syllabus}
 
 			{materials}
 
@@ -305,6 +311,7 @@ export function CourseHome({ initialCourse }: { initialCourse: CourseRecord }) {
 					onEdit={() => setEditing(true)}
 					onDelete={() => setDeleting(true)}
 					materials={<CourseMaterials courseId={courseId} />}
+					syllabus={<CourseSyllabus course={course} onChanged={() => void refresh()} />}
 				/>
 			</div>
 			<CourseFormDialog

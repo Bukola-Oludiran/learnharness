@@ -105,5 +105,10 @@ export function removeSessionFromCourse(courseId: string, chatId: string): Cours
  *  an edited goal or a later move reaches the next turn. */
 export function courseContextFor(chatId: string): string | undefined {
 	const course = courseOfSession(stores.courseStore.listCourses(), chatId);
-	return course ? courseContextSegment(course) : undefined;
+	if (!course) return undefined;
+	// The course's books that can be read now (phase 4b).
+	const books = (course.bookIds ?? [])
+		.map((id) => stores.materialStore.getMaterial(id))
+		.filter((book): book is NonNullable<typeof book> => book !== null && book.kind === "book" && book.status === "ready");
+	return courseContextSegment(course, books);
 }

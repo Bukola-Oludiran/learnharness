@@ -1,4 +1,4 @@
-import { deleteCourse, getCourse, materials, updateCourse } from "@/src/server";
+import { deleteCourse, getCourse, materials, syllabus, updateCourse } from "@/src/server";
 
 /** One course, its sessions projected down to chats that still exist. */
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -23,6 +23,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
 	if (!getCourse(id)) return Response.json({ error: "Not found" }, { status: 404 });
+	syllabus.cancelBuild(id);
 	for (const material of materials.listCourseMaterials(id)) materials.deleteMaterial(material.id);
 	if (!deleteCourse(id)) return Response.json({ error: "Not found" }, { status: 404 });
 	return Response.json({ ok: true });

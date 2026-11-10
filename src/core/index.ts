@@ -49,6 +49,7 @@ export * from "./input-events.ts";
 export * from "./attachments.ts"; // fork: answer attachments (FORK.md)
 export * from "./material.ts"; // fork: materials (FORK.md)
 export * from "./book.ts"; // fork: books (FORK.md)
+export * from "./syllabus.ts"; // fork: syllabus (FORK.md)
 export * from "./evidence.ts"; // fork: learner evidence (FORK.md)
 export { parseFilePaths, quoteFilePath, filePathLabel, isDirectoryReference, directoryReferencePath } from "./file-paths.ts";
 export type { FilePathPart } from "./file-paths.ts";
