@@ -10,7 +10,7 @@ import * as path from "node:path";
 import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { MaterialStore } from "../core/ports.ts";
-import { CURRENT_MATERIAL_VERSION, MATERIAL_ID_PATTERN, type MaterialRecord } from "../core/contracts.ts";
+import { CURRENT_MATERIAL_VERSION, MATERIAL_ID_PATTERN, type MaterialRecord, type TestReading } from "../core/contracts.ts";
 import { writeFileAtomicSync } from "./atomic-write.ts";
 
 function materialDir(id: string): string {
@@ -19,18 +19,27 @@ function materialDir(id: string): string {
 }
 const recordFile = (id: string) => path.join(materialDir(id), "record.json");
 const textFile = (id: string) => path.join(materialDir(id), "text.md");
+const readingFile = (id: string) => path.join(materialDir(id), "test.json");
+/** original.<ext> (a single upload) or original-<n>.<ext> (page n of several). */
+const ORIGINAL_NAME = /^original(?:-(\d+))?\.[a-z0-9]{1,8}$/;
 
 function writeRecord(record: MaterialRecord): void {
 	writeFileAtomicSync(recordFile(record.id), JSON.stringify({ ...record, version: CURRENT_MATERIAL_VERSION }, null, "\t"));
 	emit("materials-changed", {});
 }
 
-function createMaterial(init: Omit<MaterialRecord, "id" | "createdAt" | "updatedAt" | "version">, original: Uint8Array, extension: string): MaterialRecord {
-	if (!/^[a-z0-9]{1,8}$/.test(extension)) throw new Error(`Invalid material extension: ${extension}`);
+function createMaterial(init: Omit<MaterialRecord, "id" | "createdAt" | "updatedAt" | "version">, originals: readonly { bytes: Uint8Array; extension: string }[]): MaterialRecord {
+	if (originals.length === 0) throw new Error("A material needs at least one file");
+	for (const { extension } of originals) {
+		if (!/^[a-z0-9]{1,8}$/.test(extension)) throw new Error(`Invalid material extension: ${extension}`);
+	}
 	const now = new Date().toISOString();
 	const record: MaterialRecord = { ...init, id: `mat_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`, createdAt: now, updatedAt: now };
 	fs.mkdirSync(materialDir(record.id), { recursive: true });
-	fs.writeFileSync(path.join(materialDir(record.id), `original.${extension}`), original);
+	originals.forEach(({ bytes, extension }, index) => {
+		const name = originals.length === 1 ? `original.${extension}` : `original-${index + 1}.${extension}`;
+		fs.writeFileSync(path.join(materialDir(record.id), name), bytes);
+	});
 	writeRecord(record);
 	return { ...record, version: CURRENT_MATERIAL_VERSION };
 }
@@ -71,13 +80,31 @@ function saveMaterial(record: MaterialRecord): void {
 	writeRecord({ ...record, updatedAt: new Date().toISOString() });
 }
 
-function originalPath(id: string): string | null {
+function originalPaths(id: string): string[] {
 	try {
-		const name = fs.readdirSync(materialDir(id)).find((f) => /^original\.[a-z0-9]{1,8}$/.test(f));
-		return name ? path.join(materialDir(id), name) : null;
+		return fs
+			.readdirSync(materialDir(id))
+			.map((name) => ({ name, match: ORIGINAL_NAME.exec(name) }))
+			.filter((entry): entry is { name: string; match: RegExpExecArray } => entry.match !== null)
+			.sort((a, b) => Number(a.match[1] ?? 1) - Number(b.match[1] ?? 1))
+			.map((entry) => path.join(materialDir(id), entry.name));
+	} catch {
+		return [];
+	}
+}
+
+function readReading(id: string): TestReading | null {
+	try {
+		const parsed = JSON.parse(fs.readFileSync(readingFile(id), "utf-8")) as TestReading;
+		return Array.isArray(parsed?.questions) ? parsed : null;
 	} catch {
 		return null;
 	}
+}
+
+function writeReading(id: string, reading: TestReading): void {
+	if (!fs.existsSync(recordFile(id))) throw new Error(`Material not found: ${id}`);
+	writeFileAtomicSync(readingFile(id), JSON.stringify(reading, null, "\t"));
 }
 
 function readText(id: string): string | null {
@@ -109,7 +136,9 @@ export const materialStore: MaterialStore = {
 	getMaterial,
 	listMaterials,
 	saveMaterial,
-	originalPath,
+	originalPaths,
+	readReading,
+	writeReading,
 	readText,
 	writeText,
 	deleteMaterial,

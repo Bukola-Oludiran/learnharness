@@ -200,6 +200,11 @@ describe("the materials service", () => {
 		},
 		registerImport: (filePath) => void registered.push(filePath),
 		abortExtraction: () => {},
+		readTest: async () => ({ questions: [] }),
+		linkTest: async (questions) => questions.map(() => []),
+		sourceIdeas: () => [],
+		renderPdfPages: async () => [],
+		removeEvidence: () => {},
 	});
 	const course = stores.courseStore.createCourse("Linear algebra", "");
 
@@ -237,12 +242,12 @@ describe("the materials service", () => {
 		const { text } = service.getMaterial(waiting.id)!;
 		assert.equal(text, `## Photo\n\n${AI_READ_MARK}\n\nhandwritten Photo [?]`);
 
-		assert.equal((service.approveMaterial(waiting.id, "   ") as { code: string }).code, "empty_text");
-		const approved = service.approveMaterial(waiting.id, text!.replace("handwritten Photo [?]", "E = mc^2"));
+		assert.equal((service.approveMaterial(waiting.id, { text: "   " }) as { code: string }).code, "empty_text");
+		const approved = service.approveMaterial(waiting.id, { text: text!.replace("handwritten Photo [?]", "E = mc^2") });
 		assert.ok(approved.ok && approved.material.stage === "extracting");
 		assert.equal((await settled(waiting.id)).status, "ready");
 		assert.deepEqual(imported.at(-1), { filePath: "Linear algebra/page.png", text: "## Photo\n\nE = mc^2" });
-		assert.equal((service.approveMaterial(waiting.id, undefined) as { code: string }).code, "not_in_review");
+		assert.equal((service.approveMaterial(waiting.id, {}) as { code: string }).code, "not_in_review");
 	});
 
 	it("refuses unsupported files, oversize uploads and unknown courses without storing anything", () => {

@@ -38,13 +38,15 @@ Add one row per edit, in the same pull request that makes it.
 
 | Upstream file | Change | For | Phase |
 | --- | --- | --- | --- |
-| `config.ts` | `PATHS.courses` and `PATHS.materials`. | Courses, materials | 1, 3a |
-| `src/core/contracts.ts` | Re-exports `contracts/course.ts` and `contracts/material.ts`. | Courses, materials | 1, 3a |
-| `src/core/ports.ts` | `CourseStore` and `MaterialStore` interfaces and their record imports. | Courses, materials | 1, 3a |
-| `src/core/events.ts` | `courses-changed` and `materials-changed` in `ServerEvents` and `SERVER_EVENT_TYPES`. | Courses, materials | 1, 3a |
-| `src/server/stores.ts` | Wires `courseStore` and `materialStore` into `stores`. | Courses, materials | 1, 3a |
-| `src/server/index.ts` | Re-exports `courses.ts`, `attachments.ts` and `materials.ts`. | Courses, photo answers, materials | 1, 2, 3a |
-| `src/core/index.ts` | Re-exports `attachments.ts` and `material.ts`. | Photo answers, materials | 2, 3a |
+| `config.ts` | `PATHS.courses`, `PATHS.materials` and `EVIDENCE_FILE`. | Courses, materials, evidence | 1, 3a, 3b |
+| `src/core/contracts.ts` | Re-exports `contracts/course.ts`, `contracts/material.ts` and `contracts/evidence.ts`. | Courses, materials, evidence | 1, 3a, 3b |
+| `src/core/ports.ts` | `CourseStore`, `MaterialStore` and `EvidenceStore` interfaces and their record imports. | Courses, materials, evidence | 1, 3a, 3b |
+| `src/core/events.ts` | `courses-changed`, `materials-changed` and `evidence-changed` in `ServerEvents` and `SERVER_EVENT_TYPES`. | Courses, materials, evidence | 1, 3a, 3b |
+| `src/server/stores.ts` | Wires `courseStore`, `materialStore` and `evidenceStore` into `stores`. | Courses, materials, evidence | 1, 3a, 3b |
+| `src/server/index.ts` | Re-exports `courses.ts`, `attachments.ts`, `materials.ts` and `evidence.ts`. | Courses, photo answers, materials, evidence | 1, 2, 3a, 3b |
+| `src/core/index.ts` | Re-exports `attachments.ts`, `material.ts` and `evidence.ts`. | Photo answers, materials, evidence | 2, 3a, 3b |
+| `components/graph-canvas.ts` | `CanvasNode.tint`; tinted nodes are built into one cached path per colour and filled after the default nodes. | Evidence states | 3b |
+| `components/graph-view.tsx` | Imports `idea-evidence`; calls `useEvidenceView`; passes `tint` per node and re-feeds the canvas when evidence changes; renders `IdeaEvidence` in the detail card. | Evidence states | 3b |
 | `src/agent/teacher-agent.ts` | `AgentBuildOptions.extraSegments`, appended in order after the composed prompt in `baseAgentOptions`. | Course context, photo rule | 1, 2 |
 | `src/agent/teacher-agent.ts` | `AgentBuildOptions.imageSnapshots`, passed to `toLlmMessages` in `convertToLlm`. | Photo answers | 2 |
 | `src/server/chat-handler.ts` | Passes `extraSegments` (course context, photo rule) and `imageSnapshots` in `agentOpts`. | Course context, photo answers | 1, 2 |
@@ -70,7 +72,12 @@ Add one row per edit, in the same pull request that makes it.
 - Answer photos are resolved from the image pool as it stood when the turn started.
 - Dropping a file on a dock keeps upstream's behavior (it inserts the file's path); photos are attached with the button or by pasting.
 - HEIC photos are converted with macOS `sips`; on other systems the upload is refused with a message.
-- Materials carry no slide or page anchors into the graph yet: a material is one notes source, as upstream imports are. Anchors come with the evidence work (phase 3b).
+- Materials carry no slide or page anchors into the graph: a material is one notes source, as upstream imports are.
+- Upstream's graph read model (`src/core/graph.ts`) and `/api/graph` are not edited for evidence. The fork's `/api/graph/evidence` is joined to the snapshot in the view.
+- Practice evidence is folded from the saved session record on `turn-settled` (a bus subscription in `src/server/evidence.ts`), not recorded by the practice tools. Only problems that named `target` ideas count; "moved on" and dismissed problems record nothing.
+- A test's results are dated by its upload time. A question that matches no idea is kept on the test as unplaced; there is no manual placement yet.
+- Evidence pointing at an idea upstream has since deleted is ignored on read and left in the ledger.
+- In-lesson quiz answers are not recorded as evidence yet, and idea states do not yet steer probing or practice.
 - Deleting a material removes its stored file and record only. Ideas it added stay in the graph; upstream's source deletion removes those.
 - Material conversion runs in the server process. A restart mid-run leaves the record `processing` with no worker; it reads as interrupted and Retry starts over from the stored original.
 - Vision transcription usage is not written to any usage log (upstream's notes pipeline logs its own extraction usage on the source record).

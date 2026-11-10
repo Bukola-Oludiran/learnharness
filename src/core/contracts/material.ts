@@ -54,8 +54,13 @@ export interface MaterialRecord {
 	sourcePath: string;
 	/** Set once the notes are extracted into the graph. */
 	graphSourceId?: string;
-	/** Marked tests only (phase 3b). */
+	/** Marked tests only. */
 	score?: { earned: number; possible: number };
+	/** Marked tests only: questions whose result matched no idea. */
+	unplaced?: number;
+	/** Set when the learner approved the review (or none was needed). A
+	 *  retry after this point resumes at extraction and keeps their edits. */
+	approvedAt?: string;
 	createdAt: string;
 	updatedAt: string;
 	version?: number;
@@ -69,3 +74,5 @@ export interface MaterialView extends MaterialRecord {
 }
 
 export const MATERIAL_ACCEPT = ".pptx,.pdf,.md,.markdown,.txt,.jpg,.jpeg,.png,.gif,.webp,.bmp,.heic,.heif";
+/** A marked test is photographed pages or one scanned PDF. */
+export const TEST_ACCEPT = ".pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.heic,.heif";

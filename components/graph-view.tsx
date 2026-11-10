@@ -63,6 +63,7 @@
  * camera never moves.
  */
 
+import { IdeaEvidence, stateTint, useEvidenceView } from "@/components/idea-evidence"; // fork (FORK.md)
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { NotesImportControl, NotesImportErrors, NotesImportNotices, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
@@ -1049,6 +1050,8 @@ export function GraphView({
 	useEffect(() => {
 		if (chainSelectOpen) setChainsOpen(true);
 	}, [chainSelectOpen]);
+	// Fork (FORK.md): learner evidence, joined to the snapshot in this view.
+	const evidence = useEvidenceView(refreshTick);
 	useEffect(() => {
 		let cancelled = false;
 		fetch("/api/graph")
@@ -1393,6 +1396,7 @@ export function GraphView({
 				x: positions.get(n.id)?.x ?? 0,
 				y: positions.get(n.id)?.y ?? 0,
 				label: n.name,
+				tint: stateTint(evidence, n.id), // fork (FORK.md)
 			})),
 			edges: snapshot.edges.map((e) => ({ from: e.from, to: e.to })),
 			logicalEdges: snapshot.logicalEdges.map((e) => ({ from: e.from, to: e.to })),
@@ -1407,7 +1411,7 @@ export function GraphView({
 			// Match the app typography (Geist via the body's stack).
 			fontFamily: getComputedStyle(document.body).fontFamily,
 		});
-	}, [snapshot, isEmpty]);
+	}, [snapshot, isEmpty, evidence]);
 
 	// Feed #2 — settings: just marks the frame dirty. No rebuild, no
 	// re-layout, no camera touch (the whole point of the new renderer).
@@ -1656,6 +1660,8 @@ export function GraphView({
 					) : (
 						<div className="mt-3 text-xs text-muted-foreground">No sessions recorded.</div>
 					)}
+					{/* Fork (FORK.md): the idea's state and its dated results. */}
+					<IdeaEvidence view={evidence} nodeId={selected.node.id} />
 				</div>
 			)}
 			{/* The chain table overlay (chains-overlay plan, 2026-09-29):
