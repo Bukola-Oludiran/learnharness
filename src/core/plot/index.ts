@@ -2,3 +2,4 @@
 export * from "./expr.ts";
 export * from "./model.ts";
 export * from "./sample.ts";
+export * from "./sample3.ts";

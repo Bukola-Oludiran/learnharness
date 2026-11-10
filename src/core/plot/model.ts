@@ -9,8 +9,14 @@
  * other equation in x and y), or a definition (`a = 2`) — a number other
  * lines can use, shown as a slider when it is a plain number.
  *
- * The document records its mode ("2d"; 3D arrives in a later phase) and
- * each resolved line its kind, so new kinds extend the format.
+ * In 3D (phase 5c) a line is a surface (`z = …`, or a bare expression in x
+ * and y; likewise `x = …` and `y = …`), an implicit surface (any other
+ * equation in x, y and z), a space curve (`(x(t), y(t), z(t))`), a
+ * parametric surface (the same in u and v), or points (`(1, 2, 3)`).
+ *
+ * The document records its mode and each resolved line its kind, so new
+ * kinds extend the format. The same line can mean different things in the
+ * two modes: `x^2 + y^2 = 4` is a circle in 2D and a cylinder in 3D.
  */
 
 import { compile, ExprError, parseTokens, splitEquation, tokenize, variablesOf, type Compiled, type Expr, type Scope } from "./expr.ts";
@@ -33,16 +39,37 @@ export interface PlotLine {
 	max?: number;
 }
 
+/** The box a 3D graph shows. */
+export interface PlotBox {
+	xMin: number;
+	xMax: number;
+	yMin: number;
+	yMax: number;
+	zMin: number;
+	zMax: number;
+}
+
+export type PlotMode = "2d" | "3d";
+
 export interface PlotDoc {
 	type: "plot";
-	mode: "2d";
+	mode: PlotMode;
 	title?: string;
 	lines: PlotLine[];
 	view: PlotView;
 	/** The parameter range of parametric and polar curves. */
 	tMin?: number;
 	tMax?: number;
+	/** 3D: the box shown (the 2D view is kept, so switching back restores it). */
+	box?: PlotBox;
+	/** 3D: the parameter ranges of parametric surfaces; 0 to 2π when absent. */
+	uMin?: number;
+	uMax?: number;
+	vMin?: number;
+	vMax?: number;
 }
+
+export const DEFAULT_BOX: PlotBox = { xMin: -5, xMax: 5, yMin: -5, yMax: 5, zMin: -5, zMax: 5 };
 
 export const DEFAULT_VIEW: PlotView = { xMin: -10, xMax: 10, yMin: -10, yMax: 10 };
 export const DEFAULT_SLIDER = { min: -10, max: 10 };
@@ -56,16 +83,41 @@ export type ResolvedLine =
 	| { id: string; kind: "parametric"; x: Compiled; y: Compiled }
 	| { id: string; kind: "points"; points: [number, number][] }
 	| { id: string; kind: "definition"; name: string; value: number; slider: boolean }
+	// 3D. A surface gives one coordinate (`axis`) from the other two, in x-y-z order.
+	| { id: string; kind: "surface"; axis: "x" | "y" | "z"; fn: Compiled }
+	| { id: string; kind: "implicit3"; fn: Compiled }
+	| { id: string; kind: "curve3"; x: Compiled; y: Compiled; z: Compiled }
+	| { id: string; kind: "param-surface"; x: Compiled; y: Compiled; z: Compiled }
+	| { id: string; kind: "points3"; points: [number, number, number][] }
 	| { id: string; kind: "empty" }
-	| { id: string; kind: "error"; error: string };
+	/** `fix` names the mode in which the line would work, when that is the problem. */
+	| { id: string; kind: "error"; error: string; fix?: PlotMode };
 
-const RESERVED = new Set(["x", "y", "t", "r", "theta"]);
+/** A line that is right, but for the other mode. */
+export class ModeError extends ExprError {
+	constructor(
+		message: string,
+		readonly fix: PlotMode,
+	) {
+		super(message);
+	}
+}
+
+/** Letters that are coordinates or parameters and so cannot be sliders. `z`
+ *  is reserved in 2D too, so a 3D line typed there can say what it needs. */
+const RESERVED_2D = new Set(["x", "y", "z", "t", "r", "theta"]);
+const RESERVED_3D = new Set(["x", "y", "z", "t", "u", "v", "theta"]);
 
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
 /** A line understood but not yet evaluated: points still hold their coordinate expressions. */
-type Draft = DistributiveOmit<Exclude<ResolvedLine, { kind: "points" }>, "id"> | { kind: "points"; fns: [Compiled, Compiled][] };
+type Draft =
+	| DistributiveOmit<Exclude<ResolvedLine, { kind: "points" | "points3" }>, "id">
+	| { kind: "points"; fns: [Compiled, Compiled][] }
+	| { kind: "points3"; fns: [Compiled, Compiled, Compiled][] };
+type Classified = { line: Draft; define?: { name: string; fn: Compiled } };
 
-function classify(text: string, defined: ReadonlySet<string>): { line: Draft; define?: { name: string; fn: Compiled } } {
+function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode): Classified {
+	const RESERVED = mode === "3d" ? RESERVED_3D : RESERVED_2D;
 	const tokens = tokenize(text);
 	if (tokens.length === 0) return { line: { kind: "empty" } };
 	const sides = splitEquation(tokens);
@@ -82,12 +134,20 @@ function classify(text: string, defined: ReadonlySet<string>): { line: Draft; de
 		return list[0]!;
 	};
 
+	const definition = (name: string, right: Expr): Classified => {
+		if (defined.has(name)) throw new ExprError(`"${name}" is already defined above.`);
+		check(right, []);
+		return { line: { kind: "definition", name, value: NaN, slider: right.type === "num" || (right.type === "neg" && right.arg.type === "num") }, define: { name, fn: compile(right) } };
+	};
+	if (mode === "3d") return classify3d();
+
 	if (!sides) {
 		const list = parseTokens(tokens);
 		if (list.some((item) => item.type === "matrix")) throw new ExprError("Matrices arrive in a later version of the grapher.");
 		if (list.every((item) => item.type === "tuple")) {
 			const tuples = list as Extract<Expr, { type: "tuple" }>[];
-			if (tuples.some((tuple) => tuple.items.length !== 2)) throw new ExprError("A point needs two coordinates here; 3D arrives in a later version.");
+			if (tuples.some((tuple) => tuple.items.length === 3)) throw new ModeError("A point with three coordinates needs a 3D graph.", "3d");
+			if (tuples.some((tuple) => tuple.items.length !== 2)) throw new ExprError("A point needs two coordinates.");
 			if (tuples.length === 1 && variablesOf(tuples[0]!).has("t")) {
 				for (const item of tuples[0]!.items) check(item, ["t"]);
 				return { line: { kind: "parametric", x: compile(tuples[0]!.items[0]!), y: compile(tuples[0]!.items[1]!) } };
@@ -98,6 +158,7 @@ function classify(text: string, defined: ReadonlySet<string>): { line: Draft; de
 		}
 		const expr = scalar(list);
 		const vars = variablesOf(expr);
+		if (vars.has("z")) throw new ModeError("This uses z, so it needs a 3D graph.", "3d");
 		if (vars.has("y") && !vars.has("x")) throw new ExprError("Write this as an equation, such as x = … or y = ….");
 		check(expr, ["x"]);
 		return { line: { kind: "explicit-y", fn: compile(expr) } };
@@ -112,6 +173,7 @@ function classify(text: string, defined: ReadonlySet<string>): { line: Draft; de
 	const left = scalar(parseTokens(sides.left));
 	const right = scalar(parseTokens(sides.right));
 	const rightVars = variablesOf(right);
+	if (variablesOf(left).has("z") || rightVars.has("z")) throw new ModeError("This uses z, so it needs a 3D graph.", "3d");
 	if (left.type === "call") throw new ExprError("Write this as y = … (function definitions like f(x) = … are not supported yet).");
 	if (left.type === "var") {
 		const name = left.name;
@@ -127,17 +189,64 @@ function classify(text: string, defined: ReadonlySet<string>): { line: Draft; de
 			check(right, ["theta"]);
 			return { line: { kind: "polar", fn: compile(right) } };
 		}
-		if (!RESERVED.has(name) && name !== "e" && name !== "pi") {
-			if (defined.has(name)) throw new ExprError(`"${name}" is already defined above.`);
-			check(right, []);
-			return { line: { kind: "definition", name, value: NaN, slider: right.type === "num" || (right.type === "neg" && right.arg.type === "num") }, define: { name, fn: compile(right) } };
-		}
+		if (!RESERVED.has(name) && name !== "e" && name !== "pi") return definition(name, right);
 	}
 	check(left, ["x", "y"]);
 	check(right, ["x", "y"]);
 	const l = compile(left);
 	const r = compile(right);
 	return { line: { kind: "implicit", fn: (scope) => l(scope) - r(scope) } };
+
+	function classify3d(): Classified {
+		if (!sides) {
+			const list = parseTokens(tokens);
+			if (list.some((item) => item.type === "matrix")) throw new ExprError("Matrices arrive in a later version of the grapher.");
+			if (list.every((item) => item.type === "tuple")) {
+				const tuples = list as Extract<Expr, { type: "tuple" }>[];
+				if (tuples.some((tuple) => tuple.items.length === 2)) throw new ModeError("A point with two coordinates belongs on a 2D graph; here a point needs three.", "2d");
+				if (tuples.some((tuple) => tuple.items.length !== 3)) throw new ExprError("A point needs three coordinates.");
+				const only = tuples.length === 1 ? tuples[0]! : null;
+				const vars = only ? variablesOf(only) : new Set<string>();
+				const three = (tuple: Extract<Expr, { type: "tuple" }>) => [compile(tuple.items[0]!), compile(tuple.items[1]!), compile(tuple.items[2]!)] as [Compiled, Compiled, Compiled];
+				if (only && (vars.has("u") || vars.has("v"))) {
+					for (const item of only.items) check(item, ["u", "v"]);
+					const [x, y, z] = three(only);
+					return { line: { kind: "param-surface", x, y, z } };
+				}
+				if (only && vars.has("t")) {
+					for (const item of only.items) check(item, ["t"]);
+					const [x, y, z] = three(only);
+					return { line: { kind: "curve3", x, y, z } };
+				}
+				for (const tuple of tuples) for (const item of tuple.items) check(item, []);
+				return { line: { kind: "points3", fns: tuples.map(three) } };
+			}
+			const expr = scalar(list);
+			if (variablesOf(expr).has("z")) throw new ExprError("Write this as an equation, such as z = … or … = 0.");
+			check(expr, ["x", "y"]);
+			return { line: { kind: "surface", axis: "z", fn: compile(expr) } };
+		}
+		if (sides.left.length === 0 || sides.right.length === 0) throw new ExprError("Something is missing on one side of =.");
+		const left = scalar(parseTokens(sides.left));
+		const right = scalar(parseTokens(sides.right));
+		const rightVars = variablesOf(right);
+		if (left.type === "var") {
+			const name = left.name;
+			if (name === "r" && !defined.has("r") && rightVars.has("theta")) throw new ModeError("Polar curves only work on a 2D graph.", "2d");
+			const others = { x: ["y", "z"], y: ["x", "z"], z: ["x", "y"] }[name as "x" | "y" | "z"];
+			// z = f(x, y) is drawn directly; so are x = f(y, z) and y = f(x, z).
+			if (others && !rightVars.has(name)) {
+				check(right, others);
+				return { line: { kind: "surface", axis: name as "x" | "y" | "z", fn: compile(right) } };
+			}
+			if (!RESERVED.has(name) && name !== "e" && name !== "pi") return definition(name, right);
+		}
+		check(left, ["x", "y", "z"]);
+		check(right, ["x", "y", "z"]);
+		const l = compile(left);
+		const r = compile(right);
+		return { line: { kind: "implicit3", fn: (scope) => l(scope) - r(scope) } };
+	}
 }
 
 export interface ResolvedPlot {
@@ -147,15 +256,17 @@ export interface ResolvedPlot {
 }
 
 /** Understand every line, top to bottom. A definition is usable by the lines below and above it. */
-export function resolvePlot(doc: Pick<PlotDoc, "lines">): ResolvedPlot {
+export function resolvePlot(doc: Pick<PlotDoc, "lines"> & { mode?: PlotMode }): ResolvedPlot {
+	const mode = doc.mode ?? "2d";
 	const scope: Scope = {};
 	const defined = new Set<string>();
 	// Definitions first, in order, so a curve may use a slider written below it.
-	const drafts = new Map<string, ReturnType<typeof classify> | { error: string }>();
-	const tryClassify = (line: PlotLine) => {
+	const drafts = new Map<string, Classified | { error: string; fix?: PlotMode }>();
+	const tryClassify = (line: PlotLine): Classified | { error: string; fix?: PlotMode } => {
 		try {
-			return classify(line.text.slice(0, MAX_LINE_CHARS), defined);
+			return classify(line.text.slice(0, MAX_LINE_CHARS), defined, mode);
 		} catch (error) {
+			if (error instanceof ModeError) return { error: error.message, fix: error.fix };
 			return { error: error instanceof ExprError ? error.message : "This could not be read." };
 		}
 	};
@@ -170,8 +281,9 @@ export function resolvePlot(doc: Pick<PlotDoc, "lines">): ResolvedPlot {
 	}
 	const lines: ResolvedLine[] = doc.lines.map((line) => {
 		const draft = drafts.get(line.id) ?? tryClassify(line);
-		if ("error" in draft) return { id: line.id, kind: "error", error: draft.error };
+		if ("error" in draft) return { id: line.id, kind: "error", error: draft.error, ...(draft.fix ? { fix: draft.fix } : {}) };
 		if (draft.line.kind === "points") return { id: line.id, kind: "points", points: draft.line.fns.map(([x, y]) => [x(scope), y(scope)]) };
+		if (draft.line.kind === "points3") return { id: line.id, kind: "points3", points: draft.line.fns.map(([x, y, z]) => [x(scope), y(scope), z(scope)]) };
 		if (draft.line.kind === "definition" && !drafts.has(line.id)) return { id: line.id, kind: "error", error: "This definition could not be used." };
 		return { id: line.id, ...draft.line };
 	});
@@ -213,14 +325,37 @@ export function cleanPlotDoc(raw: unknown): PlotDoc | null {
 	const view = cleanView(input.view);
 	const tMin = typeof input.tMin === "number" && Number.isFinite(input.tMin) ? input.tMin : undefined;
 	const tMax = typeof input.tMax === "number" && Number.isFinite(input.tMax) ? input.tMax : undefined;
+	const range = (min: unknown, max: unknown) => (typeof min === "number" && typeof max === "number" && Number.isFinite(min) && Number.isFinite(max) && min < max ? ([min, max] as const) : null);
+	const u = range(input.uMin, input.uMax);
+	const v = range(input.vMin, input.vMax);
 	return {
 		type: "plot",
-		mode: "2d",
+		mode: input.mode === "3d" ? "3d" : "2d",
 		...(typeof input.title === "string" && input.title.trim() ? { title: input.title.trim().slice(0, 120) } : {}),
 		lines,
 		view,
 		...(tMin !== undefined && tMax !== undefined && tMin < tMax ? { tMin, tMax } : {}),
+		...(input.mode === "3d" || input.box ? { box: cleanBox(input.box) } : {}),
+		...(u ? { uMin: u[0], uMax: u[1] } : {}),
+		...(v ? { vMin: v[0], vMax: v[1] } : {}),
 	};
+}
+
+export function cleanBox(raw: unknown): PlotBox {
+	const b = (raw ?? {}) as Partial<PlotBox>;
+	const pair = (min: unknown, max: unknown, fallbackMin: number, fallbackMax: number): [number, number] =>
+		typeof min === "number" && typeof max === "number" && Number.isFinite(min) && Number.isFinite(max) && max - min > 1e-9 && max - min < 1e9 ? [min, max] : [fallbackMin, fallbackMax];
+	const [xMin, xMax] = pair(b.xMin, b.xMax, DEFAULT_BOX.xMin, DEFAULT_BOX.xMax);
+	const [yMin, yMax] = pair(b.yMin, b.yMax, DEFAULT_BOX.yMin, DEFAULT_BOX.yMax);
+	const [zMin, zMax] = pair(b.zMin, b.zMax, DEFAULT_BOX.zMin, DEFAULT_BOX.zMax);
+	return { xMin, xMax, yMin, yMax, zMin, zMax };
+}
+
+/** The document in the other mode: its lines are kept (each is re-read under
+ *  the new mode's rules) and a 3D graph gets a box. */
+export function withMode(doc: PlotDoc, mode: PlotMode): PlotDoc {
+	if (doc.mode === mode) return doc;
+	return { ...doc, mode, ...(mode === "3d" && !doc.box ? { box: { ...DEFAULT_BOX } } : {}) };
 }
 
 export function cleanView(raw: unknown): PlotView {
@@ -257,6 +392,10 @@ export function plotOutline(doc: PlotDoc): string {
 		rows.push(`${rows.length + 1}. ${line.text.trim()}${notes.length > 0 ? ` (${notes.join("; ")})` : ""}`);
 	}
 	if (rows.length === 0) return "";
+	if (doc.mode === "3d") {
+		const box = doc.box ?? DEFAULT_BOX;
+		return ["3D graph.", ...rows, `Box: x from ${fmt(box.xMin)} to ${fmt(box.xMax)}, y from ${fmt(box.yMin)} to ${fmt(box.yMax)}, z from ${fmt(box.zMin)} to ${fmt(box.zMax)}`].join("\n");
+	}
 	const { xMin, xMax, yMin, yMax } = doc.view;
 	return [...rows, `View: x from ${fmt(xMin)} to ${fmt(xMax)}, y from ${fmt(yMin)} to ${fmt(yMax)}`].join("\n");
 }

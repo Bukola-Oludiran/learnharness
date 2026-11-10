@@ -1,15 +1,62 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { lazy, Suspense, useMemo, useRef } from "react";
 import { PlusIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { DEFAULT_SLIDER, MAX_LINE_CHARS, MAX_PLOT_LINES, nextLineId, PLOT_COLORS, resolvePlot, withSliderValue, type PlotDoc, type PlotLine, type ResolvedLine } from "@/src/core";
+import { DEFAULT_SLIDER, MAX_LINE_CHARS, MAX_PLOT_LINES, nextLineId, PLOT_COLORS, resolvePlot, withMode, withSliderValue, type PlotDoc, type PlotLine, type PlotMode, type ResolvedLine } from "@/src/core";
 import { PlotCanvas, type PlotCanvasHandle } from "./plot-canvas";
 
 /**
  * The grapher (fork, phase 5b — see FORK.md): an expression list beside the
  * plot. The document is the single state; every edit returns a new one.
  */
+
+// three.js is fetched the first time a 3D graph is shown.
+const Plot3D = lazy(() => import("./plot-3d"));
+
+/** The plot for a document, in its mode. `zoomWith` as on PlotCanvas. */
+export function PlotSurface({
+	doc,
+	onChange,
+	canvasRef,
+	zoomWith = "wheel",
+	className,
+}: {
+	doc: PlotDoc;
+	onChange: (doc: PlotDoc) => void;
+	canvasRef?: React.Ref<PlotCanvasHandle>;
+	zoomWith?: "wheel" | "pinch";
+	className?: string;
+}) {
+	if (doc.mode === "3d") {
+		return (
+			<Suspense fallback={<div data-testid="plot-3d-loading" className={className} />}>
+				<Plot3D ref={canvasRef} doc={doc} wheelZoom={zoomWith === "wheel"} className={className} />
+			</Suspense>
+		);
+	}
+	return <PlotCanvas ref={canvasRef} doc={doc} onView={(view) => onChange({ ...doc, view })} zoomWith={zoomWith} className={className} />;
+}
+
+/** The 2D / 3D switch. Pure — exported for render tests. */
+export function ModeSwitch({ mode, onMode }: { mode: PlotMode; onMode: (mode: PlotMode) => void }) {
+	return (
+		<div role="group" aria-label="Graph dimensions" data-testid="plot-mode" className="flex border-b border-border text-xs uppercase tracking-wider">
+			{(["2d", "3d"] as const).map((option) => (
+				<button
+					key={option}
+					type="button"
+					data-testid={`plot-mode-${option}`}
+					aria-pressed={mode === option}
+					onClick={() => onMode(option)}
+					className={cn("flex-1 px-3 py-1.5 transition-colors", mode === option ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}
+				>
+					{option}
+				</button>
+			))}
+		</div>
+	);
+}
 
 /** The letter an "is not defined" error asks for, if that is what the error is. */
 export function missingName(error: string): string | null {
@@ -40,8 +87,12 @@ export function ExpressionRow({
 	onSlider,
 	onRange,
 	onAddSlider,
+	onSwitchMode,
 	inputRef,
+	placeholder,
 }: {
+	/** Switch the graph to the mode this line needs. */
+	onSwitchMode?: (mode: PlotMode) => void;
 	line: PlotLine;
 	meaning: ResolvedLine;
 	index: number;
@@ -53,6 +104,7 @@ export function ExpressionRow({
 	onRange: (min: number, max: number) => void;
 	onAddSlider: (name: string) => void;
 	inputRef?: (element: HTMLInputElement | null) => void;
+	placeholder?: string;
 }) {
 	const color = PLOT_COLORS[(line.color ?? index) % PLOT_COLORS.length]!;
 	const min = line.min ?? DEFAULT_SLIDER.min;
@@ -79,7 +131,7 @@ export function ExpressionRow({
 					spellCheck={false}
 					autoCapitalize="off"
 					autoCorrect="off"
-					placeholder={index === 0 ? "y = x^2" : ""}
+					placeholder={placeholder ?? ""}
 					onChange={(event) => onText(event.target.value)}
 					onKeyDown={(event) => {
 						if (event.key === "Enter") {
@@ -99,6 +151,16 @@ export function ExpressionRow({
 					{missing && (
 						<button type="button" data-testid="plot-add-slider" onClick={() => onAddSlider(missing)} className="underline decoration-dotted underline-offset-2 hover:text-foreground">
 							Add slider {missing}
+						</button>
+					)}
+					{meaning.fix && onSwitchMode && (
+						<button
+							type="button"
+							data-testid="plot-switch-mode"
+							onClick={() => onSwitchMode(meaning.fix!)}
+							className="underline decoration-dotted underline-offset-2 hover:text-foreground"
+						>
+							Switch to {meaning.fix.toUpperCase()}
 						</button>
 					)}
 				</p>
@@ -154,6 +216,7 @@ export function Grapher({ doc, onChange, canvasRef, className }: { doc: PlotDoc;
 	return (
 		<div data-testid="grapher" className={cn("flex min-h-0", className)}>
 			<div className="flex w-80 shrink-0 flex-col border-r border-border">
+				<ModeSwitch mode={doc.mode} onMode={(mode) => onChange(withMode(doc, mode))} />
 				<div className="min-h-0 flex-1 overflow-y-auto">
 					{doc.lines.map((line, index) => (
 						<ExpressionRow
@@ -174,6 +237,8 @@ export function Grapher({ doc, onChange, canvasRef, className }: { doc: PlotDoc;
 								if (Number.isFinite(min) && Number.isFinite(max) && min < max) patch(line.id, { min, max });
 							}}
 							onAddSlider={(name) => onChange(withSlider(doc, name))}
+							onSwitchMode={(mode) => onChange(withMode(doc, mode))}
+							placeholder={index === 0 ? (doc.mode === "3d" ? "z = x^2 + y^2" : "y = x^2") : undefined}
 						/>
 					))}
 				</div>
@@ -188,7 +253,7 @@ export function Grapher({ doc, onChange, canvasRef, className }: { doc: PlotDoc;
 					Add expression
 				</button>
 			</div>
-			<PlotCanvas ref={canvasRef} doc={doc} onView={(view) => onChange({ ...doc, view })} className="min-w-0 flex-1" />
+			<PlotSurface doc={doc} onChange={onChange} canvasRef={canvasRef} className="min-w-0 flex-1" />
 		</div>
 	);
 }

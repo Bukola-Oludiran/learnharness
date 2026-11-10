@@ -25,8 +25,9 @@ export NEXT_TELEMETRY_DISABLED=1
 npm run build
 node scripts/smoke-provider-runtime.mjs
 node scripts/build-server.mjs
-# Belt and braces with next.config.ts's trace excludes: the checkout's git
-# folder must not be packaged (its read-only files also make codesign fail).
+# The checkout's git folder must not be packaged: it is large, it is history,
+# and its read-only files make codesign fail. Done here, not in
+# next.config.ts, whose trace exclusions upstream pins exactly in a test.
 rm -rf .next/standalone/.git .next/standalone/.github
 node scripts/smoke-server.mjs
 npx electron-builder --mac --arm64 --dir --config electron-builder.local.yml --publish never
