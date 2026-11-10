@@ -1,0 +1,19 @@
+# Local, personal-use macOS build of the fork (see FORK.md → "Local app").
+# Layered over upstream's electron-builder.yml, which stays unedited.
+#
+#   - Ad-hoc signed and not notarized: the fork has no Developer ID. The app
+#     runs on the machine that built it; it is not a distributable.
+#   - No update feed: upstream's feed points at upstream's releases, which
+#     would replace this build with an app that lacks the fork's features.
+#     With no feed baked in, the in-app updater has nothing to check.
+#   - Target is the bare .app (no DMG/ZIP); scripts/install-local-app.sh
+#     copies it into /Applications.
+extends: ./electron-builder.yml
+publish: null
+mac:
+  identity: "-"
+  notarize: false
+  target:
+    - target: dir
+      arch:
+        - arm64
