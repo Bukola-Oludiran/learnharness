@@ -117,10 +117,10 @@ describe("a session scoped to a unit", () => {
 		const fragment = courseContextFor(chatId)!;
 		assert.match(fragment, /^# Course context\n\nThis session is part of the learner's course "Abstract algebra"\.\n\nCourse goal: Pass the qual\n\nCourse books, readable with read_material:/);
 		assert.match(fragment, new RegExp(`Keep the session in service of that goal[^\\n]*\\n\\nThis session's unit: "Sets" \\(unit 1 of 2\\)\\.\\n\\nIt draws on these book sections\\. Read them with read_material before teaching:\\n- "Algebra" \\(id ${stored.id}\\): \\[s1\\] Sets\\n\\nTeach this unit\\.`));
-		assert.deepEqual(materialToolsFor(chatId).map((tool) => tool.name), ["ingest_material", "material_status", "read_material", "mark_unit_covered"]);
+		assert.deepEqual(materialToolsFor(chatId).map((tool) => tool.name), ["ingest_material", "material_status", "read_material", "graph", "mark_unit_covered"]);
 		const loose = read().sessions.at(-1)!.chatId;
 		assert.doesNotMatch(courseContextFor(loose)!, /This session's unit/);
-		assert.deepEqual(materialToolsFor(loose).map((tool) => tool.name), ["ingest_material", "material_status", "read_material"]);
+		assert.deepEqual(materialToolsFor(loose).map((tool) => tool.name), ["ingest_material", "material_status", "read_material", "graph"]);
 		assert.equal(unitToolFor("chat_in_no_course"), null);
 	});
 

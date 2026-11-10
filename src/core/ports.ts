@@ -33,7 +33,7 @@ import type {
 	NotesSource,
 } from "./contracts.ts";
 import type { UserSettings } from "./settings.ts";
-import type { CanvasSummary } from "./canvas.ts"; // fork: canvas (FORK.md)
+import type { CanvasKind, CanvasSummary } from "./canvas.ts"; // fork: canvas (FORK.md)
 
 // ─── ChatStore — the session record's home (data/chats) ─────────────────────
 
@@ -135,13 +135,13 @@ export interface MaterialStore {
  *  image. The scene is the editable original; the outline is what the
  *  tutor reads beside the image. */
 export interface CanvasStore {
-	saveCanvas(chatId: string, snapshotId: string, scene: string, outline: string): void;
-	/** The session's drawings, oldest first. */
+	saveCanvas(chatId: string, snapshotId: string, kind: CanvasKind, scene: string, outline: string): void;
+	/** The session's drawings and graphs, oldest first. */
 	listCanvases(chatId: string): CanvasSummary[];
 	/** The stored scene JSON, or null. */
 	readScene(chatId: string, snapshotId: string): string | null;
-	/** snapshot id → outline, for every drawing of the session that has one. */
-	readOutlines(chatId: string): Record<string, string>;
+	/** snapshot id → outline and kind, for every drawing or graph of the session that has one. */
+	readOutlines(chatId: string): Record<string, { kind: CanvasKind; outline: string }>;
 }
 
 // ─── EvidenceStore — learner evidence (graph/evidence.jsonl; fork) ──────────

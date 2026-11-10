@@ -93,7 +93,7 @@ describe("the outline of a drawing", () => {
 
 describe("what the tutor reads", () => {
 	it("puts a drawing's outline in front of its image, and leaves photos as they were", () => {
-		const pool = { aa: { mimeType: "image/png" as const, data: "QQ==", width: 1, height: 1, outline: "Shapes:\n- A: rectangle" }, bb: { mimeType: "image/jpeg" as const, data: "Qg==", width: 1, height: 1 } };
+		const pool = { aa: { mimeType: "image/png" as const, data: "QQ==", width: 1, height: 1, outline: drawingOutlineBlock("Shapes:\n- A: rectangle") }, bb: { mimeType: "image/jpeg" as const, data: "Qg==", width: 1, height: 1 } };
 		assert.deepEqual(attachmentBlocks({ details: { attachments: ["a".repeat(64)] } }, undefined), [{ type: "text", text: "[An attached photo is no longer available.]" }]);
 		const ids = { drawing: "a".repeat(64), photo: "b".repeat(64) };
 		const blocks = attachmentBlocks({ details: { attachments: [ids.drawing, ids.photo] } }, { [ids.drawing]: pool.aa, [ids.photo]: pool.bb });
@@ -106,7 +106,7 @@ describe("what the tutor reads", () => {
 	});
 
 	it("the photo rule tells the tutor how to use the outline", () => {
-		assert.ok(PHOTO_ANSWER_RULE.endsWith(`\n\n${DRAWING_RULE}`));
+		assert.ok(PHOTO_ANSWER_RULE.includes(`\n\n${DRAWING_RULE}`));
 		assert.match(DRAWING_RULE, /Use the outline for what is labelled and what connects to what, and the image for layout\./);
 		assert.match(DRAWING_RULE, /name the specific shapes and arrows you mean\.$/);
 	});
@@ -149,7 +149,7 @@ describe("saved drawings", () => {
 	it("joins outlines onto the turn's image pool, and leaves a session without drawings untouched", () => {
 		const record = stores.chatStore.getChat(chat.id)!;
 		const pool = answerImagePool(chat.id, record.imageSnapshots)!;
-		assert.equal(pool[snapshotId]!.outline, 'Shapes:\n- A: rectangle "Client"');
+		assert.equal(pool[snapshotId]!.outline, drawingOutlineBlock('Shapes:\n- A: rectangle "Client"'), "the pool carries the finished text block");
 		assert.equal(pool[snapshotId]!.data, png.toString("base64"));
 		assert.equal("outline" in record.imageSnapshots![snapshotId]!, false, "the stored snapshot is not changed");
 		const other = stores.chatStore.createChat("No drawings");
@@ -168,11 +168,12 @@ describe("saved drawings", () => {
 });
 
 describe("the dock's attach buttons", () => {
-	const attachments = (overrides: object = {}) => ({ items: [], uploading: false, notice: null, addFiles: () => {}, addDrawing: () => {}, chatId: "chat_1", remove: () => {}, clear: () => {}, onPasteCapture: () => {}, ...overrides });
+	const attachments = (overrides: object = {}) => ({ items: [], uploading: false, notice: null, addFiles: () => {}, addDrawing: () => {}, addGraph: () => {}, chatId: "chat_1", remove: () => {}, clear: () => {}, onPasteCapture: () => {}, ...overrides });
 
 	it("offers Draw beside Photo, and neither when the answer is full", () => {
 		const html = renderToStaticMarkup(<AttachPhotoButton attachments={attachments() as never} />);
-		assert.match(html, /data-testid="attach-drawing"[^>]*>[\s\S]*?Draw<[\s\S]*data-testid="attach-photo"[^>]*>[\s\S]*?Photo</);
+		assert.match(html, /data-testid="attach-drawing"[^>]*>[\s\S]*?Draw<[\s\S]*data-testid="attach-graph"[^>]*>[\s\S]*?Graph<[\s\S]*data-testid="attach-photo"[^>]*>[\s\S]*?Photo</);
+		assert.doesNotMatch(html, /grapher-overlay/, "the grapher is not mounted until Graph is pressed");
 		assert.doesNotMatch(html, /canvas-editor/, "the canvas is not mounted until Draw is pressed");
 		const item = { key: "k", name: "n", previewUrl: "blob:x", status: "ready" };
 		const full = renderToStaticMarkup(<AttachPhotoButton attachments={attachments({ items: [item, item, item, item] }) as never} />);

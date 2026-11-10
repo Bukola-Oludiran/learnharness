@@ -11,7 +11,8 @@
 
 import type { ImageSnapshot } from "./contracts/chat.ts";
 
-import { DRAWING_RULE, drawingOutlineBlock } from "./canvas.ts";
+import { DRAWING_RULE } from "./canvas.ts";
+import { PLOT_RULE } from "./plot/model.ts";
 
 export const MAX_ANSWER_ATTACHMENTS = 4;
 export const SNAPSHOT_ID_PATTERN = /^[a-f0-9]{64}$/;
@@ -20,8 +21,9 @@ export const SNAPSHOT_ID_PATTERN = /^[a-f0-9]{64}$/;
 export const ATTACHMENT_ACCEPT = "image/jpeg,image/png,image/gif,image/webp,image/bmp,image/heic,image/heif,.heic,.heif";
 
 /** The session's image pool, by snapshot id. An entry that is a canvas
- *  drawing also carries its outline (phase 5a; joined at turn time by
- *  server/canvases.ts — the stored snapshot itself is upstream's shape). */
+ *  drawing or a graph also carries its outline as the finished text block
+ *  (phases 5a–5b; joined at turn time by server/canvases.ts — the stored
+ *  snapshot itself is upstream's shape). */
 export type ImagePool = Readonly<Record<string, ImageSnapshot & { outline?: string }>>;
 
 /** The model-facing image block (pi-ai's ImageContent shape). */
@@ -74,7 +76,7 @@ export function attachmentBlocks(
 		if (!image) return [{ type: "text" as const, text: "[An attached photo is no longer available.]" }];
 		return [
 			// A canvas drawing: its outline goes in front of its picture.
-			...(image.outline ? [{ type: "text" as const, text: drawingOutlineBlock(image.outline) }] : []),
+			...(image.outline ? [{ type: "text" as const, text: image.outline }] : []),
 			{ type: "image" as const, data: image.data, mimeType: image.mimeType },
 		];
 	});
@@ -98,4 +100,5 @@ export const PHOTO_ANSWER_RULE = [
 	"The learner can answer with photos of handwritten or drawn work. They arrive as images beside the answer.",
 	"Before you judge a photo answer, restate in one or two lines what you read from it: the key steps, the values and the final answer as you understood them. Then judge that reading. If part of the image is unclear or cut off, say which part and ask about it. Never mark work wrong on a guess at what it says.",
 	DRAWING_RULE,
+	PLOT_RULE,
 ].join("\n\n");

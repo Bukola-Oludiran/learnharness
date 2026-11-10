@@ -56,9 +56,10 @@ Add one row per edit, in the same pull request that makes it.
 | `src/server/chat-handler.ts` | `imageSnapshots` is passed through `answerImagePool`, which joins canvas outlines onto the session's images. | Canvas | 5a |
 | `src/agent/teacher-agent.ts` | `AgentBuildOptions.extraTools`, healed and appended to the teacher's registry in `createTeacherAgent` (ignored when `tools` is given). | Tutor material tools | 3c |
 | `src/server/chat-handler.ts` | Imports `material-tools.ts`; passes `extraTools: materialToolsFor(chatId)` in `agentOpts`. | Tutor material tools | 3c |
-| `components/artifacts/index.ts` | Registers `ToolCallCard` for `ingest_material`, `material_status`, `read_material` and `mark_unit_covered`. | Tutor tools | 3c, 4a, 4c |
+| `components/artifacts/index.ts` | Registers `ToolCallCard` for `ingest_material`, `material_status`, `read_material` and `mark_unit_covered`; registers `GraphCard` for `graph`. | Tutor tools, grapher | 3c, 4a, 4c, 5b |
 | `components/artifacts/tool-call-card.tsx` | `headlineArg` shows `ingest_material`'s first path and how many more, and `read_material`'s book and section. | Tutor material tools | 3c, 4a |
 | `next.config.ts` | `proxyClientMaxBodySize` raised to the book cap (200 MiB plus headroom); imports `MAX_BOOK_BYTES`. | Books | 4a |
+| `next.config.ts` | `outputFileTracingExcludes` gains `.git/**/*` and `.github/**/*`: the 5b build swept the checkout's git folder into the packaged server, and codesign failed on its read-only files. | Local app | 5b |
 | `app/api/chats/route.ts` | `POST` accepts `courseId`: 404 before the create when unknown, then adds the new session to the course. With `unitId` the session is scoped to that syllabus unit. | Courses, unit sessions | 1, 4c |
 | `components/start-session.ts` | `SessionCreation.courseId` and `unitId`; the interface is exported. | Courses, unit sessions | 1, 4c |
 | `components/new-session.tsx` | `courseId` parameter on `startDraftSession` and prop on `NewSession`. | Courses | 1 |
@@ -112,6 +113,12 @@ Add one row per edit, in the same pull request that makes it.
 - The docks gained no edit for the canvas: the Draw button is rendered by the fork's `AttachPhotoButton`. The editor is loaded lazily and is not covered by the node tests; it was smoke-tested in headless Chrome.
 - The canvas claims every keydown at the document while open, so app shortcuts do not fire under it. Its fonts are copied to `public/excalidraw/fonts` before dev and build; the CJK face (Xiaolai) is left out. Excalidraw's own "Library" button still fetches from the web.
 - The tutor cannot ask for a drawing through the question tools (no answer-form hint); it asks in prose.
+- The grapher (`src/core/plot`, `components/plot`) is the fork's own code with no dependency: one expression parser shared by the tutor's `graph` tool, the learner's grapher and the outline sent back. 2D only: functions of x or y, implicit, parametric and polar curves, points, definitions and sliders. Not yet: inequalities, function definitions (`f(x) = …`), tables, regressions, derivative notation, lists, 3D, vectors and matrices (the parser accepts matrix literals and says they arrive later).
+- A graph sent as an answer is stored like a canvas drawing (`canvases/<chatId>/<snapshotId>.plot.json` plus its outline). The session image pool now carries each drawing's or graph's finished text block.
+- The tutor's `graph` tool is teacher-only and always on. A tutor graph's card state (panning, slider drags) is the learner's exploration and is not saved; "Open in grapher" edits a copy that is sent nowhere.
+- The tutor cannot choose a curve's colour; lines take the palette in order, so a tutor's "the grey curve" may not match.
+- The `/grapher` scratchpad keeps one graph in the browser's local storage, outside any session.
+- Drawing on the canvas element is not covered by the node tests; the grapher was smoke-tested in headless Chrome (every curve kind, pan, zoom, sliders, persistence, and the answer flow).
 - Vision transcription usage is not written to any usage log (upstream's notes pipeline logs its own extraction usage on the source record).
 
 ## Local app

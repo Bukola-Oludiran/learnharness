@@ -112,9 +112,13 @@ export const DRAWING_RULE =
 	"A drawing made on the canvas arrives with an outline of its labelled shapes and arrows. Use the outline for what is labelled and what connects to what, and the image for layout. " +
 	"When you give feedback, name the specific shapes and arrows you mean.";
 
-/** One saved drawing of a session, as the canvas's "start from" list shows it. */
+/** What was saved beside an answer's picture: a canvas drawing, or (phase 5b) a graph. */
+export type CanvasKind = "drawing" | "plot";
+
+/** One saved drawing or graph of a session, as the "start from" lists show it. */
 export interface CanvasSummary {
-	/** The snapshot id of the drawing's image — its identity. */
+	/** The snapshot id of its image — its identity. */
 	snapshotId: string;
+	kind: CanvasKind;
 	createdAt: string;
 }

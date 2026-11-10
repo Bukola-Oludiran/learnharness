@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LibraryIcon, PlusIcon } from "lucide-react";
+import { ChartSplineIcon, LibraryIcon, PlusIcon } from "lucide-react";
 import { CourseFormDialog } from "@/components/course-dialogs";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import { cn } from "@/lib/utils";
@@ -92,6 +92,19 @@ export function CoursesSection({ open }: { open: boolean }) {
 			>
 				<LibraryIcon className="size-3" />
 				Library
+			</Link>
+			{/* The grapher as a scratchpad (phase 5b). */}
+			<Link
+				href="/grapher"
+				data-testid="grapher-link"
+				aria-current={pathname === "/grapher" ? "page" : undefined}
+				className={cn(
+					"mx-3 mb-2 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+					pathname === "/grapher" && "bg-accent text-foreground",
+				)}
+			>
+				<ChartSplineIcon className="size-3" />
+				Grapher
 			</Link>
 			<div className="mx-3 mb-1 flex items-center justify-between">
 				<span className="text-xs uppercase tracking-widest text-muted-foreground/70">Courses</span>

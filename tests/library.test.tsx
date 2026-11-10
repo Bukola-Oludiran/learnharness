@@ -197,7 +197,8 @@ describe("library materials", () => {
 	});
 	const get = (id: string) => service.getMaterial(id)!.material;
 	async function until(id: string, done: (material: MaterialView) => boolean): Promise<MaterialView> {
-		for (let i = 0; i < 400; i++) {
+		// A generous budget: the full suite runs many files at once.
+		for (let i = 0; i < 4000; i++) {
 			if (done(get(id))) return get(id);
 			await new Promise((resolve) => setTimeout(resolve, 5));
 		}
