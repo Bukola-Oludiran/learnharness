@@ -23,6 +23,11 @@
  * wait as `queued`, so a folder upload of hundreds of files neither floods
  * the model provider nor holds every file in memory.
  *
+ * BOOKS (phase 4a) are stored and split into sections, never extracted:
+ * the tutor reads them section by section (readBook), and a scanned page
+ * is read by the vision model the first time its section is used. A notes
+ * PDF long enough to be a book pauses for the learner's choice.
+ *
  * In-flight work lives in a globalThis registry (the turn-liveness idiom:
  * Next dev gives each route its own module instance). A `processing`
  * record with no registry entry was orphaned by a restart and reads as
@@ -35,12 +40,14 @@ import * as fs from "node:fs/promises";
 import { abortExtraction, NotesImportError } from "../agent/subagents/extraction.ts";
 import { getHeadless } from "../agent/subagents/headless.ts";
 import { emit } from "../core/events.ts";
+import { bookContentsText, bookListText, sectionText } from "../core/book.ts";
 import { cleanTestReading, testEvidenceOf, testIdeasText, testScore } from "../core/evidence.ts";
 import { assembleTranscript, detectMaterialFormat, librarySourcePath, materialSourcePath, materialTitle, transcriptForExtraction } from "../core/material.ts";
-import { MATERIAL_CONCURRENCY, MAX_MATERIAL_BYTES, MAX_TEST_PAGES, type MaterialFormat, type MaterialKind, type MaterialRecord, type MaterialView, type TestReading } from "../core/contracts.ts";
+import { LONG_NOTES_PAGES, MATERIAL_CONCURRENCY, MAX_BOOK_BYTES, MAX_MATERIAL_BYTES, MAX_TEST_PAGES, type MaterialFormat, type MaterialKind, type MaterialRecord, type MaterialView, type TestReading } from "../core/contracts.ts";
 import { ModelsNotConfiguredError, ProviderKeyMissingError } from "../core/settings.ts";
 import { extraction } from "./chat-handler.ts";
 import { removeMaterialEvidence } from "./evidence.ts";
+import { convertBook, createChapterProposer, pdfPageCount, type ChapterProposer } from "./ingest/book.ts";
 import { convertMaterial, ConversionError } from "./ingest/convert.ts";
 import { createTestLinker, createTestReader, TestReadError, type LinkableIdea, type TestLinker, type TestReader } from "./ingest/test-reader.ts";
 import { createTranscriber, TranscriptionError, type Transcriber } from "./ingest/transcribe.ts";
@@ -78,6 +85,22 @@ export interface MaterialsDeps {
 	registerImport: (filePath: string) => void;
 	abortExtraction: (sourceId: string) => void;
 	removeEvidence: (materialId: string) => void;
+	/** Books: chapter starts for a PDF with no bookmarks. Absent → equal sections. */
+	proposeChapters?: ChapterProposer;
+	/** Books: one PDF page as a PNG, for a scanned page's first read. */
+	renderPdfPage?: (path: string, page: number) => Promise<Uint8Array | null>;
+	/** Books: how long a section read waits for its scanned pages (the
+	 *  tutor's tools time out at 30 s). */
+	sectionWaitMs?: number;
+}
+
+export type BookRead = { ok: true; text: string } | { ok: false; error: string };
+
+/** Scanned pages being read for one book, in the background. */
+interface BookReadRun {
+	queue: number[];
+	running: boolean;
+	error?: string;
 }
 
 interface MaterialSlots {
@@ -87,6 +110,11 @@ interface MaterialSlots {
 interface LhMaterialsGlobal {
 	__lhMaterialRuns?: Map<string, AbortController>;
 	__lhMaterialSlots?: MaterialSlots;
+	__lhBookReads?: Map<string, BookReadRun>;
+}
+function bookReads(): Map<string, BookReadRun> {
+	const g = globalThis as typeof globalThis & LhMaterialsGlobal;
+	return (g.__lhBookReads ??= new Map());
 }
 function slots(): MaterialSlots {
 	const g = globalThis as typeof globalThis & LhMaterialsGlobal;
@@ -238,6 +266,15 @@ export function createMaterialsService(deps: MaterialsDeps) {
 	async function convertNotes(id: string, record: MaterialRecord, signal: AbortSignal): Promise<void> {
 		const [original] = materialStore.originalPaths(id);
 		if (!original) throw new ConversionError("The stored file is missing. Upload it again.");
+		// A PDF this long is probably a book: ask before extracting all of it.
+		if (record.format === "pdf" && !record.lengthAccepted) {
+			const pageCount = await pdfPageCount(original);
+			if (signal.aborted) return;
+			if (pageCount !== null && pageCount > LONG_NOTES_PAGES) {
+				update(id, { status: "review", stage: undefined, pendingChoice: "book-or-notes", pageCount });
+				return;
+			}
+		}
 		const conversion = await convertMaterial(record.format, original, deps.transcribe, signal);
 		if (signal.aborted) return;
 		const { text, aiReadParts } = assembleTranscript(conversion.parts);
@@ -273,11 +310,53 @@ export function createMaterialsService(deps: MaterialsDeps) {
 		});
 	}
 
+	/** A book: pages and sections, stored. Nothing reaches the graph. */
+	async function convertBookWork(id: string, record: MaterialRecord, signal: AbortSignal): Promise<void> {
+		const [original] = materialStore.originalPaths(id);
+		if (!original) throw new ConversionError("The stored file is missing. Upload it again.");
+		const book = await convertBook(record.format, original, deps.proposeChapters ?? (async () => []), signal);
+		if (signal.aborted) return;
+		materialStore.writeBookPages(id, book.pages);
+		const scanned = book.pages.filter((page) => page.kind === "scanned").length;
+		update(id, {
+			status: "ready",
+			stage: undefined,
+			sections: book.sections,
+			sectioning: book.sectioning,
+			pageCount: book.pages.length,
+			...(book.title ? { title: book.title } : {}),
+			notice: scanned > 0 ? `${scanned === 1 ? "1 scanned page" : `${scanned} scanned pages`}: read by the vision model when their section is first used.` : undefined,
+		});
+	}
+
+	/** Read a book's queued scanned pages one by one, keeping each as it lands. */
+	async function runBookRead(id: string, run: BookReadRun): Promise<void> {
+		run.running = true;
+		run.error = undefined;
+		try {
+			const [original] = materialStore.originalPaths(id);
+			if (!original || !deps.renderPdfPage) throw new Error("Scanned pages cannot be read here.");
+			while (run.queue.length > 0) {
+				if (!materialStore.getMaterial(id)) return; // deleted mid-read
+				const page = run.queue[0]!;
+				const png = await deps.renderPdfPage(original, page);
+				materialStore.writePageTranscript(id, page, png ? await deps.transcribe(png, `Page ${page}`) : "");
+				run.queue.shift();
+			}
+		} catch (error) {
+			run.error = failureMessage(error);
+			run.queue.length = 0;
+		} finally {
+			run.running = false;
+		}
+	}
+
 	function startConversion(id: string): void {
 		start(id, async (signal) => {
 			const record = update(id, { status: "processing", stage: "converting", error: undefined, notice: undefined, aiReadParts: 0, approvedAt: undefined });
 			if (!record) return;
-			if (record.kind === "test") await convertTest(id, signal);
+			if (record.kind === "book") await convertBookWork(id, record, signal);
+			else if (record.kind === "test") await convertTest(id, signal);
 			else await convertNotes(id, record, signal);
 		});
 	}
@@ -340,7 +419,70 @@ export function createMaterialsService(deps: MaterialsDeps) {
 			const name = baseName(fileName);
 			const verdict = detectMaterialFormat(name, bytes);
 			if ("refused" in verdict) return { ok: false, status: 400, code: "unsupported", error: verdict.refused };
+			// An EPUB is always a book.
+			if (verdict.format === "epub") return create({ path: target.path }, "book", "epub", name, [{ name, bytes }]);
 			return create(target, "notes", verdict.format, name, [{ name, bytes }]);
+		},
+
+		/** Store a book (PDF or EPUB) and split it into sections. A book
+		 *  belongs to no course until a syllabus attaches it (phase 4b). */
+		uploadBook(target: UploadTarget, fileName: string, bytes: Uint8Array): MaterialOutcome {
+			if (bytes.byteLength > MAX_BOOK_BYTES) return { ok: false, status: 413, code: "too_large", error: "Too big. Max 200 MB." };
+			const name = baseName(fileName);
+			const verdict = detectMaterialFormat(name, bytes);
+			if ("refused" in verdict) return { ok: false, status: 400, code: "unsupported", error: verdict.refused };
+			if (verdict.format !== "pdf" && verdict.format !== "epub") return { ok: false, status: 400, code: "unsupported", error: "A book must be a PDF or an EPUB." };
+			return create({ path: target.path }, "book", verdict.format, name, [{ name, bytes }]);
+		},
+
+		/** A long PDF paused for the learner's choice: make it a book, or
+		 *  extract it as notes after all. */
+		chooseMaterialKind(id: string, choice: unknown): MaterialOutcome {
+			const record = materialStore.getMaterial(id);
+			if (!record) return NOT_FOUND;
+			if (record.pendingChoice !== "book-or-notes") return { ok: false, status: 409, code: "no_choice", error: "This material is not waiting for a choice." };
+			if (choice !== "book" && choice !== "notes") return { ok: false, status: 400, code: "bad_choice", error: "Choose book or notes." };
+			if (choice === "book") {
+				// A book belongs to no course yet.
+				const course = record.courseId ? courseStore.getCourse(record.courseId) : null;
+				if (course?.materialIds?.includes(id)) courseStore.saveCourse({ ...course, materialIds: course.materialIds.filter((m) => m !== id) });
+				update(id, { kind: "book", courseId: undefined, pendingChoice: undefined, status: "processing", stage: "converting" });
+			} else update(id, { pendingChoice: undefined, lengthAccepted: true, status: "processing", stage: "converting" });
+			startConversion(id);
+			return { ok: true, material: view(materialStore.getMaterial(id)!) };
+		},
+
+		/** The tutor's view of the library's books (read_material, no arguments). */
+		bookList(): string {
+			return bookListText(materialStore.listMaterials().filter((m) => m.kind === "book"));
+		},
+
+		/** One book's sections, or one section's text. A section's scanned
+		 *  pages are read on first use: this waits briefly for them, then
+		 *  answers with what is there and says which are still being read. */
+		async readBook(id: string, sectionId?: string, part?: number): Promise<BookRead> {
+			const record = materialStore.getMaterial(id);
+			if (!record || record.kind !== "book") return { ok: false, error: `No book with id ${id}. Call read_material with no arguments to list the learner's books.` };
+			if (record.status !== "ready") return { ok: false, error: `"${record.title}" is not ready yet (${record.status}).` };
+			if (!sectionId) return { ok: true, text: bookContentsText(record) };
+			const wanted = sectionId.trim().replace(/^\[|\]$/g, "").toLowerCase();
+			const section = record.sections.find((s) => s.id.toLowerCase() === wanted) ?? record.sections.find((s) => s.title.toLowerCase() === wanted);
+			const pages = materialStore.readBookPages(id);
+			if (!section || !pages) return { ok: false, error: `"${record.title}" has no section ${sectionId}. Call read_material with only the material id to list its sections.` };
+			let read = sectionText(record, section, pages, materialStore.readPageTranscripts(id), part);
+			if (read.pending.length > 0) {
+				const run = bookReads().get(id) ?? { queue: [], running: false };
+				bookReads().set(id, run);
+				for (const page of read.pending) if (!run.queue.includes(page)) run.queue.push(page);
+				if (!run.running) void runBookRead(id, run);
+				const deadline = Date.now() + (deps.sectionWaitMs ?? 20_000);
+				while (run.running && Date.now() < deadline && read.pending.some((page) => run.queue.includes(page))) {
+					await new Promise((resolve) => setTimeout(resolve, 50));
+				}
+				if (run.error) return { ok: false, error: `The scanned pages of this section could not be read: ${run.error}` };
+				read = sectionText(record, section, pages, materialStore.readPageTranscripts(id), part);
+			}
+			return { ok: true, text: read.text };
 		},
 
 		/** Store a marked test — its pages as photos, or one scanned PDF — as ONE material. */
@@ -374,7 +516,7 @@ export function createMaterialsService(deps: MaterialsDeps) {
 		approveMaterial(id: string, edits: { text?: unknown; reading?: unknown }): MaterialOutcome {
 			const record = materialStore.getMaterial(id);
 			if (!record) return NOT_FOUND;
-			if (record.status !== "review") return { ok: false, status: 409, code: "not_in_review", error: "This material is not waiting for review." };
+			if (record.status !== "review" || record.pendingChoice) return { ok: false, status: 409, code: "not_in_review", error: "This material is not waiting for review." };
 			if (record.kind === "test") {
 				if (edits.reading !== undefined) {
 					const reading = cleanTestReading(edits.reading);
@@ -418,6 +560,7 @@ export function createMaterialsService(deps: MaterialsDeps) {
 			if (!record) return false;
 			runs().get(id)?.abort();
 			runs().delete(id);
+			bookReads().delete(id);
 			if (record.stage === "extracting") deps.abortExtraction(sourceIdOf(record.sourcePath));
 			if (record.kind === "test") deps.removeEvidence(id);
 			const course = record.courseId ? courseStore.getCourse(record.courseId) : null;
@@ -447,4 +590,9 @@ export const materials = createMaterialsService({
 	registerImport: (filePath) => sourceDirectory.registerImport(filePath),
 	abortExtraction: (sourceId) => void abortExtraction(sourceId),
 	removeEvidence: removeMaterialEvidence,
+	proposeChapters: createChapterProposer(),
+	renderPdfPage: async (path, page) => {
+		const [rendered] = await getHeadless().renderPdfPages(path, [page], { dpi: 150 });
+		return rendered ? new Uint8Array(rendered.png) : null;
+	},
 });

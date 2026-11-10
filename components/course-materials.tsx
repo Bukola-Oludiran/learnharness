@@ -9,7 +9,7 @@ import { useServerEvent, useServerResync } from "@/components/server-events";
 import { cn } from "@/lib/utils";
 import { FolderUpload } from "@/components/folder-upload";
 import { TestReviewBody } from "@/components/test-review";
-import { AI_READ_MARK, MATERIAL_ACCEPT, TEST_ACCEPT, type MaterialView, type TestReading } from "@/src/core";
+import { AI_READ_MARK, BOOK_ACCEPT, MATERIAL_ACCEPT, TEST_ACCEPT, type MaterialView, type TestReading } from "@/src/core";
 
 /**
  * The materials panel (fork, phases 3a–3b2 — see FORK.md), for one course
@@ -31,11 +31,18 @@ export function materialStatus(material: MaterialView): { label: string; busy: b
 	switch (material.status) {
 		case "processing":
 			if (material.stage === "queued") return { label: "Waiting…", busy: false, tone: "quiet" };
+			if (material.kind === "book") return { label: "Splitting into sections…", busy: true, tone: "quiet" };
 			if (material.kind === "test") return { label: material.stage === "extracting" ? "Recording results…" : "Reading the paper…", busy: true, tone: "quiet" };
 			return { label: material.stage === "extracting" ? "Adding to graph…" : "Converting…", busy: true, tone: "quiet" };
 		case "review":
+			if (material.pendingChoice) return { label: `${material.pageCount ?? "Many"} pages: book or notes?`, busy: false, tone: "attention" };
 			return { label: "Needs review", busy: false, tone: "attention" };
 		case "ready":
+			if (material.kind === "book") {
+				const unit = material.format === "epub" ? "chapter file" : "page";
+				const count = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+				return { label: `${count(material.sections.length, "section")} · ${count(material.pageCount ?? 0, unit)}`, busy: false, tone: "quiet" };
+			}
 			if (material.kind === "test") {
 				const score = material.score ? `Score ${material.score.earned}/${material.score.possible}` : "Recorded";
 				const unplaced = material.unplaced ? ` · ${material.unplaced} unplaced` : "";
@@ -53,6 +60,8 @@ export function MaterialRow({
 	where,
 	confirmingDelete = false,
 	onReview,
+	onContents,
+	onChoose,
 	onResults,
 	onRetry,
 	onAskDelete,
@@ -64,6 +73,10 @@ export function MaterialRow({
 	where?: string;
 	confirmingDelete?: boolean;
 	onReview: () => void;
+	/** Open a book's contents. */
+	onContents?: () => void;
+	/** Answer a long PDF's "book or notes?" pause. */
+	onChoose?: (choice: "book" | "notes") => void;
 	/** Open an approved test's results. */
 	onResults?: () => void;
 	onRetry: () => void;
@@ -80,7 +93,7 @@ export function MaterialRow({
 				<span className="min-w-0 flex-1">
 					<span className="block truncate font-prose text-(length:--lh-prose-size)">{material.title}</span>
 					<span className="block text-xs text-muted-foreground">
-						{material.kind === "test" ? "Marked test" : FORMAT_LABEL[material.format]}
+						{material.kind === "test" ? "Marked test" : material.kind === "book" ? "Book" : FORMAT_LABEL[material.format]}
 						{where ? ` · ${where}` : ""} ·{" "}
 						<span
 							data-testid="material-status"
@@ -102,9 +115,24 @@ export function MaterialRow({
 					</>
 				) : (
 					<>
-						{material.status === "review" && (
+						{material.status === "review" && !material.pendingChoice && (
 							<button type="button" data-testid="material-review" onClick={onReview} className={ACTION}>
 								Review
+							</button>
+						)}
+						{material.pendingChoice && onChoose && (
+							<>
+								<button type="button" data-testid="material-choose-book" onClick={() => onChoose("book")} className={ACTION}>
+									Add as book
+								</button>
+								<button type="button" data-testid="material-choose-notes" onClick={() => onChoose("notes")} className={ACTION}>
+									Extract as notes
+								</button>
+							</>
+						)}
+						{material.kind === "book" && material.status === "ready" && onContents && (
+							<button type="button" data-testid="material-contents" onClick={onContents} className={ACTION}>
+								Contents
 							</button>
 						)}
 						{material.kind === "test" && material.status === "ready" && onResults && (
@@ -129,6 +157,79 @@ export function MaterialRow({
 				</p>
 			)}
 		</div>
+	);
+}
+
+/** A book's contents — the pure body, exported for render tests. */
+export function BookContentsBody({ material, onClose }: { material: Pick<MaterialView, "title" | "sections" | "format" | "sectioning" | "notice">; onClose: () => void }) {
+	const unit = material.format === "epub" ? "file" : "p.";
+	return (
+		<div
+			role="dialog"
+			aria-modal="true"
+			aria-label="Book contents"
+			data-testid="book-contents-dialog"
+			onClick={(e) => e.stopPropagation()}
+			className="flex max-h-[calc(100vh-4rem)] w-[40rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl border bg-card p-5 shadow-xl"
+		>
+			<h2 className="text-sm font-semibold">Contents</h2>
+			<div className="mt-1.5">
+				<code className="font-mono text-sm text-foreground">{material.title}</code>
+			</div>
+			<p className="mt-2 text-sm text-muted-foreground">
+				{material.sectioning === "outline"
+					? "Sections come from the book's own table of contents."
+					: material.sectioning === "model"
+						? "This book has no table of contents, so a model proposed where its chapters begin."
+						: "This book has no table of contents, so it is split into equal sections."}{" "}
+				Nothing here is in your graph until a session teaches it. Ask the tutor to teach a section by name.
+			</p>
+			{material.notice && <p className="mt-1 text-xs text-muted-foreground">{material.notice}</p>}
+			<div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-md border border-border/60">
+				{material.sections.map((section) => (
+					<div
+						key={section.id}
+						data-testid="book-section"
+						className={cn("flex items-baseline gap-2 border-b border-border/40 px-3 py-1.5 last:border-b-0", section.level > 1 && "pl-8")}
+					>
+						<span className={cn("min-w-0 flex-1 truncate font-prose text-(length:--lh-prose-size)", section.level > 1 && "text-muted-foreground")}>{section.title}</span>
+						<span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+							{unit} {section.pageStart === section.pageEnd ? section.pageStart : `${section.pageStart}–${section.pageEnd}`}
+						</span>
+					</div>
+				))}
+			</div>
+			<div className="mt-4 flex justify-end">
+				<button type="button" data-testid="book-contents-close" onClick={onClose} className={QUIET}>
+					Close
+				</button>
+			</div>
+		</div>
+	);
+}
+
+function BookContentsDialog({ material, onClose }: { material: MaterialView | null; onClose: () => void }) {
+	const backdropDismiss = useBackdropDismiss(onClose);
+	const open = material !== null;
+	useEffect(() => {
+		if (!open) return;
+		const onKeyDown = (e: KeyboardEvent) => {
+			if (e.key === "Escape") {
+				// The one-Esc law: claimed here so it never also aborts a turn.
+				e.preventDefault();
+				e.stopPropagation();
+				onClose();
+			}
+		};
+		document.addEventListener("keydown", onKeyDown);
+		return () => document.removeEventListener("keydown", onKeyDown);
+	}, [open, onClose]);
+	if (!material) return null;
+	return createPortal(
+		<div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80" {...backdropDismiss}>
+			<BookContentsBody material={material} onClose={onClose} />
+		</div>,
+		document.body,
 	);
 }
 
@@ -340,6 +441,8 @@ export function MaterialsPanel({ courseId }: { courseId?: string }) {
 	const [problems, setProblems] = useState<string[]>([]);
 	const [uploading, setUploading] = useState(0);
 	const [reviewingId, setReviewingId] = useState<string | null>(null);
+	const [contentsId, setContentsId] = useState<string | null>(null);
+	const bookInputRef = useRef<HTMLInputElement>(null);
 	const [deletingId, setDeletingId] = useState<string | null>(null);
 	const inputRef = useRef<HTMLInputElement>(null);
 
@@ -394,6 +497,37 @@ export function MaterialsPanel({ courseId }: { courseId?: string }) {
 		void refresh();
 	};
 
+	/** Books go up one at a time, raw, like notes; they can be far larger. */
+	const uploadBooks = async (files: FileList) => {
+		const list = [...files];
+		setProblems([]);
+		setUploading((n) => n + list.length);
+		for (const file of list) {
+			try {
+				const res = await fetch(`/api/materials?kind=book&name=${encodeURIComponent(file.name)}`, {
+					method: "POST",
+					headers: { "Content-Type": "application/octet-stream" },
+					body: file,
+				});
+				if (!res.ok) {
+					const body = (await res.json().catch(() => ({}))) as { error?: string };
+					setProblems((prev) => [...prev, `${file.name}: ${body.error ?? `Upload failed (${res.status}).`}`]);
+				}
+			} catch {
+				setProblems((prev) => [...prev, `${file.name}: Upload failed — network error.`]);
+			} finally {
+				setUploading((n) => n - 1);
+			}
+		}
+		void refresh();
+	};
+
+	const choose = (id: string, choice: "book" | "notes") => {
+		void fetch(`/api/materials/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ choice }) })
+			.catch(() => undefined)
+			.then(() => refresh());
+	};
+
 	const act = (path: string, method: "POST" | "DELETE") => {
 		void fetch(path, { method })
 			.catch(() => undefined)
@@ -401,7 +535,7 @@ export function MaterialsPanel({ courseId }: { courseId?: string }) {
 	};
 
 	// Review while waiting; an approved test reopens read-only as its results.
-	const reviewing = materials?.find((m) => m.id === reviewingId && (m.status === "review" || (m.kind === "test" && m.status === "ready"))) ?? null;
+	const reviewing = materials?.find((m) => m.id === reviewingId && ((m.status === "review" && !m.pendingChoice) || (m.kind === "test" && m.status === "ready"))) ?? null;
 	const testInputRef = useRef<HTMLInputElement>(null);
 
 	/** A marked test: every chosen page goes up together and becomes ONE material. */
@@ -461,6 +595,33 @@ export function MaterialsPanel({ courseId }: { courseId?: string }) {
 					</button>
 				)}
 				{!courseId && (
+					<>
+						<input
+							ref={bookInputRef}
+							type="file"
+							multiple
+							hidden
+							accept={BOOK_ACCEPT}
+							data-testid="book-upload-input"
+							onChange={(e) => {
+								if (e.target.files && e.target.files.length > 0) void uploadBooks(e.target.files);
+								e.target.value = "";
+							}}
+						/>
+						<button
+							type="button"
+							data-testid="book-upload"
+							title="A PDF or EPUB book: stored and split into sections, taught from as you cover it"
+							onClick={() => bookInputRef.current?.click()}
+							disabled={uploading > 0}
+							className={cn(QUIET, "flex items-center gap-1.5")}
+						>
+							<UploadIcon className="size-3" />
+							Upload book
+						</button>
+					</>
+				)}
+				{!courseId && (
 					<FolderUpload
 						disabled={uploading > 0}
 						onDone={(refused) => {
@@ -503,7 +664,7 @@ export function MaterialsPanel({ courseId }: { courseId?: string }) {
 					<div className="px-2 py-3 text-xs text-muted-foreground">Loading…</div>
 				) : materials.length === 0 ? (
 					<div data-testid="course-materials-empty" className="px-2 py-3 text-xs text-muted-foreground">
-						No materials yet. Upload slides (.pptx), Word documents (.docx), PDFs, photos of notes, or text files, and their ideas join your
+						No materials yet. {!courseId && "Upload a book (PDF or EPUB) and the tutor teaches from it section by section. "}Upload slides (.pptx), Word documents (.docx), PDFs, photos of notes, or text files, and their ideas join your
 						knowledge graph. Upload a marked test and its results are recorded on the ideas it tests.
 						{!courseId && " Upload folder takes a whole folder at once and lets you check each file first."}
 					</div>
@@ -515,6 +676,8 @@ export function MaterialsPanel({ courseId }: { courseId?: string }) {
 							where={courseId ? undefined : materialFolder(material)}
 							confirmingDelete={deletingId === material.id}
 							onReview={() => setReviewingId(material.id)}
+							onContents={() => setContentsId(material.id)}
+							onChoose={(choice) => choose(material.id, choice)}
 							onResults={() => setReviewingId(material.id)}
 							onRetry={() => act(`/api/materials/${material.id}/retry`, "POST")}
 							onAskDelete={() => setDeletingId(material.id)}
@@ -528,6 +691,7 @@ export function MaterialsPanel({ courseId }: { courseId?: string }) {
 				)}
 			</div>
 			<MaterialReviewDialog material={reviewing} onClose={() => setReviewingId(null)} />
+			<BookContentsDialog material={materials?.find((m) => m.id === contentsId && m.kind === "book") ?? null} onClose={() => setContentsId(null)} />
 		</section>
 	);
 }

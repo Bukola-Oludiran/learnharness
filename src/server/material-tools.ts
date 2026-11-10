@@ -11,15 +11,26 @@ import { courseOfSession } from "../core/course.ts";
 import { materials } from "./materials.ts";
 import { stores } from "./stores.ts";
 
-type MaterialsService = Pick<typeof materials, "uploadMaterial" | "uploadTest" | "listMaterials">;
+type MaterialsService = Pick<typeof materials, "uploadMaterial" | "uploadTest" | "uploadBook" | "listMaterials" | "bookList" | "readBook">;
 
 export function materialToolDeps(chatId: string, service: MaterialsService = materials): MaterialToolDeps {
 	return {
 		ingest: (kind, files) => {
 			// Resolved per call: the session may have joined or left a course mid-lesson.
 			const target = { courseId: courseOfSession(stores.courseStore.listCourses(), chatId)?.id };
-			const outcome = kind === "test" ? service.uploadTest(target, files) : service.uploadMaterial(target, files[0]!.name, files[0]!.bytes);
+			const outcome =
+				kind === "test"
+					? service.uploadTest(target, files)
+					: kind === "book"
+						? service.uploadBook({}, files[0]!.name, files[0]!.bytes)
+						: service.uploadMaterial(target, files[0]!.name, files[0]!.bytes);
 			return outcome.ok ? { ok: true, id: outcome.material.id } : { ok: false, error: outcome.error };
+		},
+		read: async ({ material, section, part }) => {
+			if (!material) return service.bookList();
+			const outcome = await service.readBook(material, section, part);
+			if (!outcome.ok) throw new Error(outcome.error);
+			return outcome.text;
 		},
 		materials: (ids) => {
 			const all = service.listMaterials();

@@ -3,7 +3,7 @@
  * the graph source path, and transcript assembly. No IO.
  */
 
-import { MAX_MATERIAL_BYTES, type MaterialFormat, type MaterialRecord } from "./contracts/material.ts";
+import { MAX_BOOK_BYTES, MAX_MATERIAL_BYTES, type MaterialFormat, type MaterialRecord } from "./contracts/material.ts";
 
 const startsWith = (bytes: Uint8Array, magic: readonly number[], at = 0) => magic.every((b, i) => bytes[at + i] === b);
 const ascii = (bytes: Uint8Array, from: number, length: number) => String.fromCharCode(...bytes.subarray(from, from + length));
@@ -47,7 +47,7 @@ export function detectMaterialFormat(fileName: string, bytes: Uint8Array): Forma
 	if (startsWith(bytes, [0x50, 0x4b, 0x03, 0x04])) {
 		if (ext === "pptx") return { format: "pptx" };
 		if (ext === "docx") return { format: "docx" };
-		if (ext === "epub") return { refused: "Books (EPUB) are not supported yet." };
+		if (ext === "epub") return { format: "epub" };
 		return { refused: UNSUPPORTED_REFUSAL };
 	}
 	if (["md", "markdown", "txt"].includes(ext)) {
@@ -83,16 +83,19 @@ export function librarySourcePath(relativePath: string | null | undefined, fileN
 
 const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif"];
 const NOTES_EXTENSIONS = ["pptx", "docx", "pdf", "md", "markdown", "txt", ...IMAGE_EXTENSIONS];
+const BOOK_EXTENSIONS = ["pdf", "epub"];
 /** A file name that says "this is a test paper" (words approved by the owner, 2026-11-10). */
 const TEST_NAME = /(^|[^a-z])(tests?|exams?|quiz|quizzes|midterms?|finals?|papers?|marked)([^a-z]|$)/i;
 
-export type FolderChoice = "notes" | "test" | "skip";
+export type FolderChoice = "notes" | "test" | "book" | "skip";
 
 export interface FolderFileVerdict {
 	/** The pre-selected choice; the learner can change it. */
 	choice: FolderChoice;
 	/** Whether "Marked test" can be chosen (photos and PDFs only). */
 	testable: boolean;
+	/** Whether "Book" can be chosen (PDF and EPUB only). */
+	bookable: boolean;
 	/** Set when the file cannot be uploaded at all; it is listed greyed out. */
 	refused?: string;
 }
@@ -103,14 +106,17 @@ export interface FolderFileVerdict {
  */
 export function folderFileVerdict(fileName: string, size: number): FolderFileVerdict {
 	const ext = /\.([A-Za-z0-9]+)$/.exec(fileName)?.[1]?.toLowerCase() ?? "";
-	const refuse = (refused: string): FolderFileVerdict => ({ choice: "skip", testable: false, refused });
+	const refuse = (refused: string): FolderFileVerdict => ({ choice: "skip", testable: false, bookable: false, refused });
 	if (fileName.startsWith(".") || fileName.startsWith("~$")) return refuse("Hidden or temporary file.");
 	if (ext === "ppt" || ext === "doc") return refuse("Old Office file. Export it as .pptx, .docx or PDF.");
-	if (!NOTES_EXTENSIONS.includes(ext)) return refuse("Not a supported file type.");
+	const bookable = BOOK_EXTENSIONS.includes(ext);
+	if (!bookable && !NOTES_EXTENSIONS.includes(ext)) return refuse("Not a supported file type.");
 	if (size === 0) return refuse("The file is empty.");
-	if (size > MAX_MATERIAL_BYTES) return refuse("Too big. Max 25 MB.");
+	if (size > (bookable ? MAX_BOOK_BYTES : MAX_MATERIAL_BYTES)) return refuse(bookable ? "Too big. Max 200 MB." : "Too big. Max 25 MB.");
+	// An EPUB is always a book; a PDF too big for notes can only be one.
+	if (ext === "epub" || size > MAX_MATERIAL_BYTES) return { choice: "book", testable: false, bookable: true };
 	const testable = ext === "pdf" || IMAGE_EXTENSIONS.includes(ext);
-	return { choice: testable && TEST_NAME.test(materialTitle(fileName)) ? "test" : "notes", testable };
+	return { choice: testable && TEST_NAME.test(materialTitle(fileName)) ? "test" : "notes", testable, bookable };
 }
 
 /** The display title: the file name without its extension. */
@@ -168,15 +174,17 @@ export const TRANSCRIBE_INSTRUCTIONS = [
 ].join("\n\n");
 
 /** What one material's state reads as to the tutor (`material_status`). */
-export function materialStatusLine(material: Pick<MaterialRecord, "title" | "kind" | "status" | "stage" | "error" | "score"> & { interrupted?: boolean }): string {
-	const head = `- ${material.title} (${material.kind === "test" ? "marked test" : "notes"})`;
+export function materialStatusLine(material: Pick<MaterialRecord, "title" | "kind" | "status" | "stage" | "error" | "score" | "pendingChoice"> & { interrupted?: boolean }): string {
+	const head = `- ${material.title} (${material.kind === "test" ? "marked test" : material.kind})`;
 	if (material.interrupted) return `${head}: interrupted when the app closed. The learner can retry it in the Library.`;
 	switch (material.status) {
 		case "processing":
 			return `${head}: ${material.stage === "queued" ? "waiting its turn" : "being processed"}.`;
 		case "review":
+			if (material.pendingChoice) return `${head}: it is long; the learner must choose in the Library whether to add it as a book or extract it as notes.`;
 			return `${head}: waiting for the learner's review in the Library.`;
 		case "ready":
+			if (material.kind === "book") return `${head}: stored and split into sections; read it with read_material.`;
 			if (material.kind !== "test") return `${head}: in the graph.`;
 			return `${head}: results recorded${material.score ? `, score ${material.score.earned}/${material.score.possible}` : ""}.`;
 		case "failed":

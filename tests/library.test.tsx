@@ -54,13 +54,13 @@ describe("library source paths", () => {
 describe("the folder checklist's verdicts", () => {
 	it("pre-selects marked tests from the file name, for photos and PDFs only", () => {
 		for (const name of ["Midterm 1.pdf", "stats_exam_2019.PDF", "quiz3.jpg", "Final.pdf", "past paper.png", "marked-hw.heic", "Tests.pdf"]) {
-			assert.deepEqual(folderFileVerdict(name, 1000), { choice: "test", testable: true }, name);
+			assert.deepEqual([folderFileVerdict(name, 1000).choice, folderFileVerdict(name, 1000).testable], ["test", true], name);
 		}
 		for (const name of ["Week 2 - Bayes.pdf", "latest.pdf", "contest.png", "protest.pdf"]) {
-			assert.deepEqual(folderFileVerdict(name, 1000), { choice: "notes", testable: true }, name);
+			assert.deepEqual([folderFileVerdict(name, 1000).choice, folderFileVerdict(name, 1000).testable], ["notes", true], name);
 		}
 		for (const name of ["exam notes.docx", "midterm review.pptx", "quiz.txt", "test.md"]) {
-			assert.deepEqual(folderFileVerdict(name, 1000), { choice: "notes", testable: false }, name);
+			assert.deepEqual(folderFileVerdict(name, 1000), { choice: "notes", testable: false, bookable: false }, name);
 		}
 	});
 
@@ -71,7 +71,7 @@ describe("the folder checklist's verdicts", () => {
 		assert.match(folderFileVerdict("no-extension", 1000).refused!, /Not a supported/);
 		assert.match(folderFileVerdict("~$Week 1.docx", 1000).refused!, /temporary/);
 		assert.match(folderFileVerdict("empty.pdf", 0).refused!, /empty/);
-		assert.match(folderFileVerdict("huge.pdf", 25 * 1024 * 1024 + 1).refused!, /Max 25 MB/);
+		assert.match(folderFileVerdict("huge.pptx", 25 * 1024 * 1024 + 1).refused!, /Max 25 MB/);
 		assert.equal(folderFileVerdict("old.ppt", 1000).choice, "skip");
 	});
 
@@ -85,7 +85,7 @@ describe("the folder checklist's verdicts", () => {
 			{ name: "a.xlsx", size: 5, path: "Uni/a.xlsx" },
 		]);
 		assert.deepEqual(items.map((item) => item.path), ["Uni/a.xlsx", "Uni/exam.pdf", "Uni/Week 2.pdf", "Uni/Week 10.pdf"]);
-		assert.deepEqual(folderSummary(items), { notes: 2, tests: 1, skipped: 1, label: "2 sets of notes · 1 marked test · 1 skipped" });
+		assert.deepEqual(folderSummary(items), { notes: 2, tests: 1, books: 0, skipped: 1, label: "2 sets of notes · 1 marked test · 1 skipped" });
 		assert.equal(fileSize(340 * 1024), "340 KB");
 		assert.equal(fileSize(1.25 * 1024 * 1024), "1.3 MB");
 	});
@@ -125,7 +125,7 @@ describe("FolderChecklistBody", () => {
 		const uploading = body({ progress: { done: 1, total: 3 } });
 		assert.match(uploading, /Uploading 2 of 3…/);
 		assert.match(uploading, /data-testid="folder-cancel"[^>]* disabled=""/);
-		const many = Array.from({ length: MAX_FOLDER_FILES + 1 }, (_, i) => ({ path: `f/${i}.md`, size: 1, choice: "notes" as const, testable: false }));
+		const many = Array.from({ length: MAX_FOLDER_FILES + 1 }, (_, i) => ({ path: `f/${i}.md`, size: 1, choice: "notes" as const, testable: false, bookable: false }));
 		const tooMany = body({ items: many });
 		assert.match(tooMany, /data-testid="folder-too-many"/);
 		assert.doesNotMatch(tooMany, /folder-start|folder-item/);

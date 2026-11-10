@@ -56,6 +56,16 @@ export interface MaterialRecord {
 	sourcePath: string;
 	/** Set once the notes are extracted into the graph. */
 	graphSourceId?: string;
+	/** Books, and long PDFs paused for a choice: pages (PDF) or chapter
+	 *  files (EPUB). */
+	pageCount?: number;
+	/** Books only: where the sections came from. */
+	sectioning?: "outline" | "model" | "fixed";
+	/** A PDF uploaded as notes that is long enough to be a book: paused at
+	 *  `review` until the learner picks (owner, 2026-11-10). */
+	pendingChoice?: "book-or-notes";
+	/** The learner chose to extract a long PDF as notes anyway. */
+	lengthAccepted?: boolean;
 	/** Marked tests only. */
 	score?: { earned: number; possible: number };
 	/** Marked tests only: questions whose result matched no idea. */
@@ -82,3 +92,18 @@ export const TEST_ACCEPT = ".pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.heic,.heif";
 export const MATERIAL_CONCURRENCY = 2;
 /** The most files one folder upload lists. */
 export const MAX_FOLDER_FILES = 1000;
+/** A book is a PDF or an EPUB. */
+export const BOOK_ACCEPT = ".pdf,.epub";
+/** A book is never sent to a model whole, so it may be far larger than notes. */
+export const MAX_BOOK_BYTES = 200 * 1024 * 1024;
+export const MAX_BOOK_PAGES = 3000;
+/** A notes PDF longer than this is offered as a book instead. */
+export const LONG_NOTES_PAGES = 80;
+
+/** One page of a stored book: a PDF page, or one chapter file of an EPUB. */
+export interface BookPage {
+	n: number;
+	/** `scanned` pages have no text until a vision model reads them, on first use. */
+	kind: "text" | "scanned" | "empty";
+	text: string;
+}

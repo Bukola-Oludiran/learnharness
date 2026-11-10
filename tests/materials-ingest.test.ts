@@ -111,7 +111,7 @@ describe("format detection and transcript assembly", () => {
 		assert.deepEqual(detectMaterialFormat("notes.md", Buffer.from("# Title")), { format: "text" });
 		assert.deepEqual(detectMaterialFormat("essay.docx", zip), { format: "docx" });
 		assert.match((detectMaterialFormat("grades.xlsx", zip) as { refused: string }).refused, /not supported/);
-		assert.match((detectMaterialFormat("book.epub", zip) as { refused: string }).refused, /not supported yet/);
+		assert.deepEqual(detectMaterialFormat("book.epub", zip), { format: "epub" });
 		assert.match((detectMaterialFormat("old.ppt", Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0, 0])) as { refused: string }).refused, /export it as \.pptx, \.docx or PDF/);
 		assert.match((detectMaterialFormat("blob.txt", Buffer.from([65, 0, 66])) as { refused: string }).refused, /text file/);
 		assert.match((detectMaterialFormat("empty.txt", new Uint8Array()) as { refused: string }).refused, /empty/);
