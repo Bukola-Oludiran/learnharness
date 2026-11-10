@@ -17,6 +17,8 @@
 
 import { cleanCourseGoal, cleanCourseTitle, courseContextSegment, courseOfSession, courseSummary, withLiveSessions, withSession, withoutSession } from "../core/course.ts";
 import type { CourseRecord, CourseSummary } from "../core/contracts.ts";
+import { unitContextBlock, withUnitActive } from "../core/syllabus.ts";
+import { weakIdeasForCourse } from "./evidence.ts";
 import { stores } from "./stores.ts";
 
 export type CourseOutcome =
@@ -75,7 +77,7 @@ export function deleteCourse(id: string): boolean {
 }
 
 /** Put a session in a course, moving it out of any other course first. */
-export function addSessionToCourse(courseId: string, chatId: unknown): CourseOutcome {
+export function addSessionToCourse(courseId: string, chatId: unknown, unitId?: string): CourseOutcome {
 	const course = stores.courseStore.getCourse(courseId);
 	if (!course) return NO_COURSE;
 	const chat = typeof chatId === "string" && /^[A-Za-z0-9_-]+$/.test(chatId) ? stores.chatStore.getChat(chatId) : null;
@@ -85,7 +87,11 @@ export function addSessionToCourse(courseId: string, chatId: unknown): CourseOut
 		const without = withoutSession(other, chat.id);
 		if (without !== other) stores.courseStore.saveCourse(without);
 	}
-	const next = withSession(course, { chatId: chat.id, kind: chat.kind ?? "teach", unitIds: [] }, new Date().toISOString());
+	// A session started on a syllabus unit (phase 4c) is scoped to it, and
+	// the unit becomes in progress. An unknown unit id scopes to nothing.
+	const unit = unitId ? course.syllabus?.units.find((u) => u.id === unitId) : undefined;
+	let next = withSession(course, { chatId: chat.id, kind: chat.kind ?? "teach", unitIds: unit ? [unit.id] : [] }, new Date().toISOString());
+	if (unit && next.syllabus) next = { ...next, syllabus: withUnitActive(next.syllabus, unit.id) };
 	if (next !== course) stores.courseStore.saveCourse(next);
 	return { ok: true, course: liveView(next, liveChatIds()) };
 }
@@ -110,5 +116,7 @@ export function courseContextFor(chatId: string): string | undefined {
 	const books = (course.bookIds ?? [])
 		.map((id) => stores.materialStore.getMaterial(id))
 		.filter((book): book is NonNullable<typeof book> => book !== null && book.kind === "book" && book.status === "ready");
-	return courseContextSegment(course, books);
+	const unitId = course.sessions.find((session) => session.chatId === chatId)?.unitIds[0];
+	const unitBlock = unitId && course.syllabus ? unitContextBlock(course.syllabus, unitId, books, weakIdeasForCourse(course.id)) : null;
+	return courseContextSegment(course, books, unitBlock);
 }

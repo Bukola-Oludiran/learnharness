@@ -19,10 +19,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 	return Response.json({ course: outcome.course, building: true });
 }
 
-/** One edit to one unit: { unitId, op: "rename" | "move" | "skip" | "delete", … }. */
+/** One edit to one unit: { unitId, op: "rename" | "move" | "skip" | "cover" | "delete", … }. */
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
-	const body = (await req.json().catch(() => null)) as { unitId?: unknown; op?: unknown; title?: unknown; direction?: unknown; skipped?: unknown } | null;
+	const body = (await req.json().catch(() => null)) as { unitId?: unknown; op?: unknown; title?: unknown; direction?: unknown; skipped?: unknown; covered?: unknown } | null;
 	const unitId = typeof body?.unitId === "string" ? body.unitId : "";
 	const outcome =
 		body?.op === "rename"
@@ -31,7 +31,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 				? syllabus.moveUnit(id, unitId, body.direction)
 				: body?.op === "skip"
 					? syllabus.setUnitSkipped(id, unitId, body.skipped)
-					: body?.op === "delete"
+					: body?.op === "cover"
+						? syllabus.setUnitCovered(id, unitId, body.covered)
+						: body?.op === "delete"
 						? syllabus.deleteUnit(id, unitId)
 						: ({ ok: false, status: 400, code: "bad_op", error: "Unknown edit." } as const);
 	if (!outcome.ok) return Response.json({ error: outcome.error, code: outcome.code }, { status: outcome.status });

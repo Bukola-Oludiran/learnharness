@@ -53,11 +53,11 @@ Add one row per edit, in the same pull request that makes it.
 | `src/server/chat-handler.ts` | Calls `assertAttachmentsUploaded` before `inputAppends`. | Photo answers | 2 |
 | `src/agent/teacher-agent.ts` | `AgentBuildOptions.extraTools`, healed and appended to the teacher's registry in `createTeacherAgent` (ignored when `tools` is given). | Tutor material tools | 3c |
 | `src/server/chat-handler.ts` | Imports `material-tools.ts`; passes `extraTools: materialToolsFor(chatId)` in `agentOpts`. | Tutor material tools | 3c |
-| `components/artifacts/index.ts` | Registers `ToolCallCard` for `ingest_material`, `material_status` and `read_material`. | Tutor material tools | 3c, 4a |
+| `components/artifacts/index.ts` | Registers `ToolCallCard` for `ingest_material`, `material_status`, `read_material` and `mark_unit_covered`. | Tutor tools | 3c, 4a, 4c |
 | `components/artifacts/tool-call-card.tsx` | `headlineArg` shows `ingest_material`'s first path and how many more, and `read_material`'s book and section. | Tutor material tools | 3c, 4a |
 | `next.config.ts` | `proxyClientMaxBodySize` raised to the book cap (200 MiB plus headroom); imports `MAX_BOOK_BYTES`. | Books | 4a |
-| `app/api/chats/route.ts` | `POST` accepts `courseId`: 404 before the create when unknown, then adds the new session to the course. | Courses | 1 |
-| `components/start-session.ts` | `SessionCreation.courseId`. | Courses | 1 |
+| `app/api/chats/route.ts` | `POST` accepts `courseId`: 404 before the create when unknown, then adds the new session to the course. With `unitId` the session is scoped to that syllabus unit. | Courses, unit sessions | 1, 4c |
+| `components/start-session.ts` | `SessionCreation.courseId` and `unitId`; the interface is exported. | Courses, unit sessions | 1, 4c |
 | `components/new-session.tsx` | `courseId` parameter on `startDraftSession` and prop on `NewSession`. | Courses | 1 |
 | `app/chat/new/page.tsx` | Reads `?course=<id>` and passes it to `NewSession`. | Courses | 1 |
 | `components/sidebar.tsx` | Imports and renders `CoursesSection` above the session search row. | Courses | 1 |
@@ -101,7 +101,10 @@ Add one row per edit, in the same pull request that makes it.
 - A course lists library books in `bookIds`; a book carries no course. A book deleted from the library leaves a stale id that reads as absent.
 - The syllabus is built only on request, by one strong-slot call that sees the books' contents lists (chapters only past 250 sections), never their text. A build runs in the server process; a restart mid-build leaves the syllabus as it was.
 - A rebuild replaces every unit that is not covered, including skipped ones and hand edits. Units cannot be added by hand, and a unit's sections and prerequisites cannot be edited; reordering does not check prerequisites.
-- The tutor is told a course's ready books but not its syllabus; sessions are not scoped to units and no unit becomes active or covered until phase 4c.
+- A unit session is one teaching session started from a unit (`unitIds` holds one id). Its first message is sent for the learner ("Start the unit: <title>"). The tutor is told that unit, not the whole syllabus. Practice sessions are not scoped to units.
+- "Covered" is the tutor's `mark_unit_covered` call or the learner's toggle; nothing infers it from the transcript. Deleting a unit's session leaves the unit in progress.
+- Quiz evidence counts teach-phase multiple-choice answers only: not predictions, free-recall answers (no stored verdict) or the opening probe. An answer is recorded only once it matches an idea the session has put in the graph; until then it is retried after later turns. The match is one cheap-model call per settled turn that has something new to match, and is skipped (and retried) when no background model is set.
+- Idea states still do not steer probing or practice targets; the unit block only lists the course's recently missed or shaky ideas.
 - Vision transcription usage is not written to any usage log (upstream's notes pipeline logs its own extraction usage on the source record).
 
 ## Local app

@@ -156,3 +156,70 @@ export function buildBlocker(course: { goal: string }, readyBooks: number): stri
 	if (!course.goal.trim()) return "Add a course goal first: the syllabus is planned around it.";
 	return null;
 }
+
+/** Mark a unit covered, or back to in progress (it had a session) / to do.
+ *  A skipped unit can be covered directly. Null when nothing changes. */
+export function setUnitCovered(syllabus: Syllabus, unitId: string, covered: boolean, hasSession = false): Syllabus | null {
+	const unit = syllabus.units.find((u) => u.id === unitId);
+	if (!unit || (unit.status === "covered") === covered) return null;
+	return mapUnit(syllabus, unitId, (u) => ({ ...u, status: covered ? "covered" : hasSession ? "active" : "todo" }));
+}
+
+/** A session started on the unit: to do → in progress. Unchanged otherwise. */
+export function withUnitActive(syllabus: Syllabus, unitId: string): Syllabus {
+	return syllabus.units.some((u) => u.id === unitId && u.status === "todo") ? mapUnit(syllabus, unitId, (u) => ({ ...u, status: "active" }))! : syllabus;
+}
+
+/**
+ * The unit "Continue course" goes to: the first unit in order that is not
+ * covered or skipped and whose prerequisites are all covered, skipped or
+ * gone; failing that, the first unfinished unit. Null when none is left.
+ */
+export function nextUnit(syllabus: Syllabus): SyllabusUnit | null {
+	const open = syllabus.units.filter((unit) => unit.status === "todo" || unit.status === "active");
+	const settled = new Set(syllabus.units.filter((unit) => unit.status === "covered" || unit.status === "skipped").map((unit) => unit.id));
+	const known = new Set(syllabus.units.map((unit) => unit.id));
+	return open.find((unit) => unit.dependsOn.every((id) => settled.has(id) || !known.has(id))) ?? open[0] ?? null;
+}
+
+/** An idea the learner has recently got wrong (missed) or only partly right (shaky). */
+export interface WeakIdea {
+	name: string;
+	state: "missed" | "shaky";
+}
+
+/**
+ * The unit block of the tutor's course fragment, for a session scoped to a
+ * unit (wording approved by the owner, 2026-11-10). Lines with nothing to
+ * say are left out. Null when the unit is not in the syllabus.
+ */
+export function unitContextBlock(syllabus: Syllabus, unitId: string, books: readonly SyllabusBook[], weak: readonly WeakIdea[] = []): string | null {
+	const index = syllabus.units.findIndex((unit) => unit.id === unitId);
+	if (index < 0) return null;
+	const unit = syllabus.units[index]!;
+	const sources = books
+		.map((book) => {
+			const sections = unit.sources
+				.filter((source) => source.materialId === book.id)
+				.map((source) => book.sections.find((section) => section.id === source.sectionId))
+				.filter((section): section is MaterialSection => section !== undefined);
+			return sections.length > 0 ? `- "${book.title}" (id ${book.id}): ${sections.map((section) => `[${section.id}] ${section.title}`).join("; ")}` : null;
+		})
+		.filter((line): line is string => line !== null);
+	const covered = syllabus.units.filter((u) => u.status === "covered" && u.id !== unitId).map((u) => u.title);
+	return [
+		`This session's unit: "${unit.title}" (unit ${index + 1} of ${syllabus.units.length}).`,
+		...(sources.length > 0 ? [["It draws on these book sections. Read them with read_material before teaching:", ...sources].join("\n")] : []),
+		...(covered.length > 0 || weak.length > 0
+			? [
+					[
+						...(covered.length > 0 ? [`Units already covered: ${covered.join("; ")}.`] : []),
+						...(weak.length > 0 ? [`Ideas from this course the learner has recently got wrong or only partly right: ${weak.map((idea) => `${idea.name} (${idea.state})`).join("; ")}.`] : []),
+					].join("\n"),
+				]
+			: []),
+		unit.status === "covered"
+			? "This unit is already marked covered; the learner has come back to it."
+			: "Teach this unit. When you have taught its material and checked the learner's understanding of it, call mark_unit_covered.",
+	].join("\n\n");
+}
