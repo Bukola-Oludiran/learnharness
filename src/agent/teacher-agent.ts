@@ -131,6 +131,9 @@ export interface AgentBuildOptions {
 	/** Fork (FORK.md): the session's image pool — answer attachments are
 	 *  stored as ids and become images at the provider boundary. */
 	imageSnapshots?: ImagePool;
+	/** Fork (FORK.md): tools added to the TEACHER's registry only (the
+	 *  material tools). Not toggle-filtered; ignored when `tools` is given. */
+	extraTools?: readonly AgentTool<any>[];
 	/** Native conversation identity: the existing persisted chat id, reused
 	 * across reconstructed prober, teacher, and practice Agents.
 	 * Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream events
@@ -307,7 +310,9 @@ export function createTeacherAgent(
 	opts: AgentBuildOptions = {},
 ) {
 	const tools = opts.tools ?? (ctx ? createTeacherTools(ctx, opts.toolToggles) : bareQuestionTools());
-	return baseAgentOptions("teacher", opts, Object.values(tools));
+	// Fork (FORK.md): the teacher's extra tools, healed like the registry's own.
+	const extra = opts.tools ? [] : (opts.extraTools ?? []).map(withArgumentHeal);
+	return baseAgentOptions("teacher", opts, [...Object.values(tools), ...extra]);
 }
 
 /** The bare teach question set (tests, bare agents): quiz with the shared

@@ -53,4 +53,7 @@ export const artifactRenderers: Record<string, ComponentType<ArtifactPartProps>>
 	// discipline (their results are pre-formatted strings too).
 	list_sessions: ToolCallCard,
 	list_propositions: ToolCallCard,
+	// Fork (FORK.md): the tutor's material tools, same quiet card.
+	ingest_material: ToolCallCard,
+	material_status: ToolCallCard,
 };

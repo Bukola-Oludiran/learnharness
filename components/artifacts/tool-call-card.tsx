@@ -33,6 +33,10 @@ function headlineArg(tool: string, input: unknown): string {
 		return p;
 	}
 	if (typeof inp.pattern === "string") return inp.pattern;
+	// Fork (FORK.md): ingest_material — the first file, and how many more.
+	if (tool === "ingest_material" && Array.isArray(inp.paths) && typeof inp.paths[0] === "string") {
+		return inp.paths.length > 1 ? `${inp.paths[0]} +${inp.paths.length - 1}` : inp.paths[0];
+	}
 	// list_propositions: the session id is the call's subject — the
 	// collapsed line reads "list_propositions chat_…". Shown as given
 	// (the id is exactly what list_sessions reported to the model).

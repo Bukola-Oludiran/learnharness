@@ -51,6 +51,10 @@ Add one row per edit, in the same pull request that makes it.
 | `src/agent/teacher-agent.ts` | `AgentBuildOptions.imageSnapshots`, passed to `toLlmMessages` in `convertToLlm`. | Photo answers | 2 |
 | `src/server/chat-handler.ts` | Passes `extraSegments` (course context, photo rule) and `imageSnapshots` in `agentOpts`. | Course context, photo answers | 1, 2 |
 | `src/server/chat-handler.ts` | Calls `assertAttachmentsUploaded` before `inputAppends`. | Photo answers | 2 |
+| `src/agent/teacher-agent.ts` | `AgentBuildOptions.extraTools`, healed and appended to the teacher's registry in `createTeacherAgent` (ignored when `tools` is given). | Tutor material tools | 3c |
+| `src/server/chat-handler.ts` | Imports `material-tools.ts`; passes `extraTools: materialToolsFor(chatId)` in `agentOpts`. | Tutor material tools | 3c |
+| `components/artifacts/index.ts` | Registers `ToolCallCard` for `ingest_material` and `material_status`. | Tutor material tools | 3c |
+| `components/artifacts/tool-call-card.tsx` | `headlineArg` shows `ingest_material`'s first path and how many more. | Tutor material tools | 3c |
 | `app/api/chats/route.ts` | `POST` accepts `courseId`: 404 before the create when unknown, then adds the new session to the course. | Courses | 1 |
 | `components/start-session.ts` | `SessionCreation.courseId`. | Courses | 1 |
 | `components/new-session.tsx` | `courseId` parameter on `startDraftSession` and prop on `NewSession`. | Courses | 1 |
@@ -85,6 +89,8 @@ Add one row per edit, in the same pull request that makes it.
 - Two library uploads with the same folder path and file name share one graph source (the source id is a hash of the path), as a re-import does upstream.
 - At most two materials convert or extract at once; the rest wait as `queued`. The queue lives in the server process, so a restart leaves waiting materials interrupted; "Retry all failed" restarts them.
 - Word (.docx) reading takes body paragraphs, headings and tables. Headers, footers, footnotes, comments and text boxes are not read; pictures are transcribed after the text, not at their place in it.
+- The tutor's material tools (`ingest_material`, `material_status`) exist in teaching sessions only, are not in `TOGGLEABLE_TOOLS` (no Settings switch) and are not described in the prompt fragments; their descriptions carry the rules. The tutor is not woken when a material finishes.
+- The compaction threshold estimate does not count the two material tools' schemas.
 - Vision transcription usage is not written to any usage log (upstream's notes pipeline logs its own extraction usage on the source record).
 
 ## Local app
