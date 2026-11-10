@@ -34,6 +34,7 @@ import { collectToolCallIds } from "./pi/call-ids.ts";
 import { providerEventNote } from "../agent/provider-events.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 import { courseContextFor } from "./courses.ts";
+import { materialToolsFor } from "./material-tools.ts"; // fork: the tutor's material tools (FORK.md)
 import { hasPhotoAnswers, PHOTO_ANSWER_RULE } from "../core/attachments.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
 import { providerKeyPresent } from "./keys.ts";
@@ -470,6 +471,7 @@ export async function handleChatInput(
 		extraSegments: [courseContextFor(chatId), hasPhotoAnswers(agentMessages) ? PHOTO_ANSWER_RULE : undefined]
 			.filter((segment): segment is string => segment !== undefined),
 		imageSnapshots: record.imageSnapshots,
+		extraTools: materialToolsFor(chatId),
 	};
 	// PRACTICE BRANCH (owner design, 2026-10-04): a kind:"practice"
 	// session builds the practitioner from turn 1 — no prober→teacher

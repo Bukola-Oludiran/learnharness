@@ -3,7 +3,7 @@
  * the graph source path, and transcript assembly. No IO.
  */
 
-import { MAX_MATERIAL_BYTES, type MaterialFormat } from "./contracts/material.ts";
+import { MAX_MATERIAL_BYTES, type MaterialFormat, type MaterialRecord } from "./contracts/material.ts";
 
 const startsWith = (bytes: Uint8Array, magic: readonly number[], at = 0) => magic.every((b, i) => bytes[at + i] === b);
 const ascii = (bytes: Uint8Array, from: number, length: number) => String.fromCharCode(...bytes.subarray(from, from + length));
@@ -166,3 +166,32 @@ export const TRANSCRIBE_INSTRUCTIONS = [
 	].join("\n"),
 	"Reply with the transcription only.",
 ].join("\n\n");
+
+/** What one material's state reads as to the tutor (`material_status`). */
+export function materialStatusLine(material: Pick<MaterialRecord, "title" | "kind" | "status" | "stage" | "error" | "score"> & { interrupted?: boolean }): string {
+	const head = `- ${material.title} (${material.kind === "test" ? "marked test" : "notes"})`;
+	if (material.interrupted) return `${head}: interrupted when the app closed. The learner can retry it in the Library.`;
+	switch (material.status) {
+		case "processing":
+			return `${head}: ${material.stage === "queued" ? "waiting its turn" : "being processed"}.`;
+		case "review":
+			return `${head}: waiting for the learner's review in the Library.`;
+		case "ready":
+			if (material.kind !== "test") return `${head}: in the graph.`;
+			return `${head}: results recorded${material.score ? `, score ${material.score.earned}/${material.score.possible}` : ""}.`;
+		case "failed":
+			return `${head}: failed. ${material.error ?? "Something went wrong."} The learner can retry it in the Library.`;
+	}
+}
+
+/** The tutor's `ingest_material` result: what started, and what was refused. */
+export function ingestResultText(started: readonly { name: string; id: string }[], refused: readonly { name: string; error: string }[]): string {
+	const blocks: string[] = [];
+	if (started.length > 0) {
+		blocks.push(
+			[`Started adding ${started.length} ${started.length === 1 ? "file" : "files"} to the learner's library:`, ...started.map((s) => `- ${s.name} (id ${s.id}): processing.`)].join("\n"),
+		);
+	}
+	if (refused.length > 0) blocks.push(["Not added:", ...refused.map((r) => `- ${r.name}: ${r.error}`)].join("\n"));
+	return blocks.join("\n\n");
+}
