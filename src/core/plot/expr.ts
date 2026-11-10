@@ -124,7 +124,7 @@ const FUNCTIONS: Record<string, { arity: number | [number, number]; fn: (...args
 	max: { arity: [1, 8], fn: Math.max },
 };
 /** Functions of vectors and matrices (phase 5d), by how many values each takes. Evaluated in linalg.ts. */
-const LINEAR_FUNCTIONS: Record<string, number | [number, number]> = { dot: 2, cross: 2, norm: 1, det: 1, trace: 1, transpose: 1, inv: 1, span: [1, 3] };
+const LINEAR_FUNCTIONS: Record<string, number | [number, number]> = { dot: 2, cross: 2, norm: 1, det: 1, trace: 1, transpose: 1, inv: 1, span: [1, 3], solve: 2, transform: 1, eigen: 1 };
 const CONSTANTS: Record<string, number> = { pi: Math.PI, e: Math.E };
 const DEG = Math.PI / 180;
 /** Multi-letter names that are variables, not products of letters. */

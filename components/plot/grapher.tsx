@@ -1,11 +1,11 @@
 "use client";
 
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { KeyboardIcon, PlusIcon, XIcon } from "lucide-react";
+import { KeyboardIcon, PlayIcon, PlusIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Keypad, type Key } from "./keypad";
 import { MATH_LINE_CSS, MathLine, type LineHandle } from "./math-line";
-import { formatEntry, formatResult, formatValue, functionHeader, withoutTypeset, DEFAULT_SLIDER, MAX_LINE_CHARS, MAX_PLOT_LINES, nextLineId, PLOT_COLORS, resolvePlot, withMode, withSliderValue, type PlotDoc, type PlotLine, type PlotMode, type ResolvedLine } from "@/src/core";
+import { formatEntry, formatResult, formatValue, functionHeader, withoutTypeset, DEFAULT_SLIDER, MAX_LINE_CHARS, MAX_PLOT_LINES, nextLineId, PLOT_COLORS, resolvePlot, withMode, withSliderValue, withTransformAt, type PlotDoc, type PlotLine, type PlotMode, type ResolvedLine } from "@/src/core";
 import { PlotCanvas, type PlotCanvasHandle } from "./plot-canvas";
 
 /**
@@ -115,6 +115,54 @@ export function MatrixValue({ rows }: { rows: readonly (readonly number[])[] }) 
 	);
 }
 
+const PLAY_MS = 1800;
+
+/** A transformation's before/after slider, with a play button that runs it from before to after (phase 5d-2). */
+export function TransformSlider({ at, color, onAt }: { at: number; color: string; onAt: (at: number) => void }) {
+	const frame = useRef<number | null>(null);
+	const live = useRef(onAt);
+	live.current = onAt;
+	const stop = () => {
+		if (frame.current !== null) cancelAnimationFrame(frame.current);
+		frame.current = null;
+	};
+	useEffect(() => stop, []);
+	const play = () => {
+		stop();
+		const started = performance.now();
+		const step = (now: number) => {
+			const t = Math.min(1, (now - started) / PLAY_MS);
+			// Ease in and out, so the start and the landing are easy to follow.
+			live.current(t * t * (3 - 2 * t));
+			frame.current = t < 1 ? requestAnimationFrame(step) : null;
+		};
+		frame.current = requestAnimationFrame(step);
+	};
+	return (
+		<div data-testid="plot-transform" className="flex items-center gap-1.5 text-xs text-muted-foreground">
+			<button type="button" data-testid="plot-transform-play" aria-label="Play the transformation" title="Play from before to after" onClick={play} className="shrink-0 rounded-sm border border-border p-1 transition-colors hover:bg-accent hover:text-foreground">
+				<PlayIcon className="size-3" />
+			</button>
+			<span>before</span>
+			<input
+				type="range"
+				aria-label="Transformation, from before to after"
+				min={0}
+				max={1}
+				step={0.01}
+				value={at}
+				onChange={(event) => {
+					stop();
+					onAt(Number(event.target.value));
+				}}
+				className="min-w-0 flex-1"
+				style={{ accentColor: color }}
+			/>
+			<span>after</span>
+		</div>
+	);
+}
+
 const NUMBER_FIELD = "w-14 rounded-sm border border-input bg-background px-1 py-0.5 text-right font-mono text-xs";
 
 /** One expression row. Pure — exported for render tests. */
@@ -130,6 +178,7 @@ export function ExpressionRow({
 	onSlider,
 	onRange,
 	onAddSlider,
+	onAt,
 	onSwitchMode,
 	onFocus,
 	inputRef,
@@ -152,6 +201,8 @@ export function ExpressionRow({
 	onSlider: (value: number) => void;
 	onRange: (min: number, max: number) => void;
 	onAddSlider: (name: string) => void;
+	/** A transform line's before/after slider moved. */
+	onAt?: (at: number) => void;
 	inputRef?: (handle: LineHandle | null) => void;
 	placeholder?: string;
 }) {
@@ -225,6 +276,21 @@ export function ExpressionRow({
 				<p data-testid="plot-line-value" className="mt-1 pl-6 text-xs text-muted-foreground">
 					= {meaning.note}
 				</p>
+			)}
+			{meaning.kind === "transform" && (
+				<div className="mt-1.5 pl-6">
+					<TransformSlider at={meaning.at} color={color} onAt={(at) => onAt?.(at)} />
+					<p data-testid="plot-line-value" className="mt-1 font-mono text-xs text-muted-foreground">
+						det = {formatValue(meaning.det)}
+					</p>
+				</div>
+			)}
+			{meaning.kind === "eigen" && (
+				<div data-testid="plot-line-value" className="mt-1 pl-6 font-mono text-xs text-muted-foreground">
+					{meaning.rows.map((row) => (
+						<p key={row}>{row}</p>
+					))}
+				</div>
 			)}
 			{meaning.kind === "definition" && meaning.slider && (
 				<div className="mt-1.5 flex items-center gap-1.5 pl-6" data-testid="plot-slider">
@@ -345,6 +411,7 @@ export function Grapher({ doc, onChange, canvasRef, className }: { doc: PlotDoc;
 								if (Number.isFinite(min) && Number.isFinite(max) && min < max) patch(line.id, { min, max });
 							}}
 							onAddSlider={(name) => onChange(withSlider(doc, name))}
+							onAt={(at) => onChange(withTransformAt(doc, line.id, at))}
 							onSwitchMode={(mode) => onChange(withMode(doc, mode))}
 							onFocus={() => {
 								focused.current = line.id;

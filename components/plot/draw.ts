@@ -1,5 +1,5 @@
 import {
-	parameterRanges, PLOT_COLORS, resolvePlot, sampleFunction, sampleImplicit, sampleParametric, samplePolar, tickLabel, ticks, niceStep, type PlotDoc, type PlotView, type Polyline,
+	blendMatrix, formatEntry, parameterRanges, PLOT_COLORS, resolvePlot, sampleFunction, sampleImplicit, sampleParametric, samplePolar, tickLabel, ticks, niceStep, type PlotDoc, type PlotView, type Polyline,
 } from "@/src/core";
 
 /**
@@ -118,6 +118,22 @@ export function drawPlot(ctx: CanvasRenderingContext2D, width: number, height: n
 		ctx.fill();
 		ctx.restore();
 	};
+	/** The whole line through the origin along a direction. */
+	const through = (dx: number, dy: number) => {
+		const length = Math.hypot(dx, dy);
+		if (!(length > 0)) return;
+		const reach = (Math.hypot(view.xMax - view.xMin, view.yMax - view.yMin) + Math.hypot(view.xMin + view.xMax, view.yMin + view.yMax)) / length;
+		ctx.beginPath();
+		ctx.moveTo(px(-dx * reach), py(-dy * reach));
+		ctx.lineTo(px(dx * reach), py(dy * reach));
+		ctx.stroke();
+	};
+	// A transformation moves the learner's named vectors and points; the first one showing is the one they follow.
+	const leading = resolved.lines.find((line, index) => line.kind === "transform" && !doc.lines[index]!.hidden);
+	const lead = leading?.kind === "transform" && leading.at > 0 ? blendMatrix(leading.matrix, leading.at) : null;
+	const apply = (m: readonly (readonly number[])[], x: number, y: number): [number, number] => [m[0]![0]! * x + m[0]![1]! * y, m[1]![0]! * x + m[1]![1]! * y];
+	const moved = (x: number, y: number): [number, number] => (lead ? apply(lead, x, y) : [x, y]);
+	const GHOST = 0.28;
 	ctx.lineJoin = "round";
 	ctx.lineCap = "round";
 	ctx.lineWidth = 2.25;
@@ -155,26 +171,46 @@ export function drawPlot(ctx: CanvasRenderingContext2D, width: number, height: n
 			case "points":
 				for (const [x, y] of line.points) {
 					if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+					const [mx, my] = moved(x, y);
+					if (lead) {
+						// Where it started, faintly.
+						ctx.save();
+						ctx.globalAlpha = GHOST;
+						ctx.beginPath();
+						ctx.arc(px(x), py(y), 4.5, 0, 2 * Math.PI);
+						ctx.fill();
+						ctx.restore();
+					}
 					ctx.beginPath();
-					ctx.arc(px(x), py(y), 4.5, 0, 2 * Math.PI);
+					ctx.arc(px(mx), py(my), 4.5, 0, 2 * Math.PI);
 					ctx.fill();
 				}
 				break;
 			case "vector": {
 				const [x, y] = line.value;
 				if (line.value.length !== 2 || !Number.isFinite(x) || !Number.isFinite(y)) break;
+				// Only a named vector is carried by a transformation: a result such as A u already says where it lands.
+				const carried = lead !== null && line.name !== undefined;
+				const [tx, ty] = carried ? moved(x!, y!) : [x!, y!];
+				if (carried) {
+					ctx.save();
+					ctx.globalAlpha = GHOST;
+					arrow(px(0), py(0), px(x!), py(y!), HEAD);
+					ctx.restore();
+				}
 				// A sum: the second vector again, dashed, from the first one's tip.
 				if (line.guide && line.guide.from.every(Number.isFinite)) {
+					const [fx, fy] = carried ? moved(line.guide.from[0]!, line.guide.from[1]!) : line.guide.from;
 					ctx.save();
 					ctx.globalAlpha = 0.7;
 					ctx.lineWidth = 1.5;
 					ctx.setLineDash([6, 5]);
-					arrow(px(line.guide.from[0]!), py(line.guide.from[1]!), px(x!), py(y!), 8);
+					arrow(px(fx!), py(fy!), px(tx), py(ty), 8);
 					ctx.restore();
 				}
-				arrow(px(0), py(0), px(x!), py(y!), HEAD);
+				arrow(px(0), py(0), px(tx), py(ty), HEAD);
 				if (line.draggable) {
-					// A ring at the tip: this one can be dragged.
+					// A ring at the tip as written: this one can be dragged.
 					ctx.save();
 					ctx.lineWidth = 1.5;
 					ctx.globalAlpha = 0.55;
@@ -186,8 +222,8 @@ export function drawPlot(ctx: CanvasRenderingContext2D, width: number, height: n
 				const label = vectorLabel(line.name, source.text);
 				if (label) {
 					ctx.font = "600 13px ui-monospace, SFMono-Regular, Menlo, monospace";
-					ctx.textAlign = x! < 0 ? "right" : "left";
-					ctx.fillText(label, px(x!) + (x! < 0 ? -11 : 11), py(y!) + (y! < 0 ? 16 : -9));
+					ctx.textAlign = tx < 0 ? "right" : "left";
+					ctx.fillText(label, px(tx) + (tx < 0 ? -11 : 11), py(ty) + (ty < 0 ? 16 : -9));
 				}
 				break;
 			}
@@ -195,19 +231,87 @@ export function drawPlot(ctx: CanvasRenderingContext2D, width: number, height: n
 				// One direction: the whole line through the origin. Two fill the plane, which needs no drawing.
 				const [dx, dy] = line.basis[0] ?? [];
 				if (line.basis.length !== 1 || dx === undefined || dy === undefined) break;
-				const reach = Math.hypot(view.xMax - view.xMin, view.yMax - view.yMin) + Math.hypot(view.xMin + view.xMax, view.yMin + view.yMax);
 				ctx.save();
 				ctx.globalAlpha = 0.6;
 				ctx.lineWidth = 1.75;
+				through(dx, dy);
+				ctx.restore();
+				break;
+			}
+			case "transform": {
+				if (line.matrix.length !== 2) break;
+				const m = blendMatrix(line.matrix, line.at);
+				// The grid, carried along: straight lines stay straight, so two ends each are enough.
+				const count = Math.min(60, Math.ceil(Math.max(Math.abs(view.xMin), Math.abs(view.xMax), Math.abs(view.yMin), Math.abs(view.yMax)) / xStep) + 1);
+				const far = count * xStep;
+				ctx.save();
+				ctx.lineWidth = 1;
+				ctx.globalAlpha = 0.34;
 				ctx.beginPath();
-				ctx.moveTo(px(-dx * reach), py(-dy * reach));
-				ctx.lineTo(px(dx * reach), py(dy * reach));
+				for (let k = -count; k <= count; k++) {
+					for (const [from, to] of [[apply(m, k * xStep, -far), apply(m, k * xStep, far)], [apply(m, -far, k * xStep), apply(m, far, k * xStep)]] as const) {
+						ctx.moveTo(px(from[0]), py(from[1]));
+						ctx.lineTo(px(to[0]), py(to[1]));
+					}
+				}
+				ctx.stroke();
+				// The unit square: its area becomes |det|.
+				const corners = [apply(m, 0, 0), apply(m, 1, 0), apply(m, 1, 1), apply(m, 0, 1)];
+				ctx.beginPath();
+				corners.forEach(([x, y], corner) => (corner === 0 ? ctx.moveTo(px(x), py(y)) : ctx.lineTo(px(x), py(y))));
+				ctx.closePath();
+				ctx.globalAlpha = 0.2;
+				ctx.fill();
+				ctx.globalAlpha = 0.85;
+				ctx.lineWidth = 1.5;
 				ctx.stroke();
 				ctx.restore();
+				ctx.font = "600 13px ui-monospace, SFMono-Regular, Menlo, monospace";
+				for (const [name, [x, y]] of [["î", apply(m, 1, 0)], ["ĵ", apply(m, 0, 1)]] as const) {
+					arrow(px(0), py(0), px(x), py(y), HEAD);
+					ctx.textAlign = x < 0 ? "right" : "left";
+					ctx.fillText(name, px(x) + (x < 0 ? -9 : 9), py(y) + (y < 0 ? 16 : -8));
+				}
+				break;
+			}
+			case "eigen": {
+				if (line.size !== 2) break;
+				ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, monospace";
+				for (const pair of line.pairs) {
+					// A single direction is a line that the matrix keeps on itself; a whole plane of them needs no drawing.
+					const [dx, dy] = pair.vectors[0] ?? [];
+					if (pair.vectors.length !== 1 || dx === undefined || dy === undefined) continue;
+					ctx.save();
+					ctx.globalAlpha = 0.8;
+					ctx.lineWidth = 1.75;
+					ctx.setLineDash([9, 5]);
+					through(dx, dy);
+					ctx.restore();
+					const along = (0.36 * (view.xMax - view.xMin)) / Math.hypot(dx, dy);
+					ctx.textAlign = "left";
+					ctx.fillText(`λ = ${formatEntry(pair.value)}`, px(dx * along) + 8, py(dy * along) - 8);
+				}
 				break;
 			}
 			default:
 				break;
 		}
+	}
+
+	// Where the straight lines meet: a marked, labelled point.
+	const meet = resolved.meet?.result;
+	if (meet?.kind === "point" && meet.at.length === 2) {
+		const [x, y] = meet.at as [number, number];
+		ctx.fillStyle = theme.background;
+		ctx.strokeStyle = theme.axis;
+		ctx.lineWidth = 2;
+		ctx.beginPath();
+		ctx.arc(px(x), py(y), 5, 0, 2 * Math.PI);
+		ctx.fill();
+		ctx.stroke();
+		ctx.fillStyle = theme.axis;
+		ctx.font = "600 12px ui-monospace, SFMono-Regular, Menlo, monospace";
+		ctx.textAlign = "left";
+		ctx.fillText(`(${formatEntry(x)}, ${formatEntry(y)})`, px(x) + 10, py(y) - 9);
 	}
 }

@@ -8,7 +8,7 @@ import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { cn } from "@/lib/utils";
 import {
-	curve3, DEFAULT_BOX, implicitMesh, niceStep, parameterRanges, paramSurfaceMesh, PLOT_COLORS, resolvePlot, surfaceMesh, tickLabel, ticks, type Mesh, type PlotBox, type PlotDoc, type Point3,
+	blendMatrix, curve3, DEFAULT_BOX, formatEntry, implicitMesh, spanBasis, niceStep, parameterRanges, paramSurfaceMesh, PLOT_COLORS, resolvePlot, surfaceMesh, tickLabel, ticks, type Mesh, type PlotBox, type PlotDoc, type Point3,
 } from "@/src/core";
 import { vectorLabel } from "./draw";
 import type { PlotCanvasHandle } from "./plot-canvas";
@@ -112,7 +112,7 @@ function build(stage: Stage, doc: PlotDoc, width: number, height: number): void 
 	};
 	const labels: Label[] = [];
 	/** An arrow between two graph points: a shaft and a cone, sized in the cube's own units so it looks the same in any box. */
-	const addArrow = (from: Point3, to: Point3, color: string, dashed = false) => {
+	const addArrow = (from: Point3, to: Point3, color: string, dashed = false, opacity = 1) => {
 		const start = new THREE.Vector3(...norm(from));
 		const end = new THREE.Vector3(...norm(to));
 		const length = start.distanceTo(end);
@@ -127,20 +127,51 @@ function build(stage: Stage, doc: PlotDoc, width: number, height: number): void 
 		const neck = end.clone().addScaledVector(direction, -head);
 		const geometry = new LineGeometry();
 		geometry.setPositions([start.x, start.y, start.z, neck.x, neck.y, neck.z]);
-		const material = new LineMaterial({ color, linewidth: dashed ? 2 : 3.5, clippingPlanes: CLIP, ...(dashed ? { dashed: true, dashSize: 0.07, gapSize: 0.05 } : {}) });
+		const material = new LineMaterial({ color, linewidth: dashed ? 2 : 3.5, clippingPlanes: CLIP, transparent: opacity < 1, opacity, ...(dashed ? { dashed: true, dashSize: 0.07, gapSize: 0.05 } : {}) });
 		material.resolution.set(width, height);
 		stage.lineMaterials.push(material);
 		const shaft = new Line2(geometry, material);
 		if (dashed) shaft.computeLineDistances();
 		stage.content.add(shaft);
-		const cone = new THREE.Mesh(new THREE.ConeGeometry(head * 0.32, head, 20), new THREE.MeshPhongMaterial({ color, clippingPlanes: CLIP }));
+		const cone = new THREE.Mesh(new THREE.ConeGeometry(head * 0.32, head, 20), new THREE.MeshPhongMaterial({ color, clippingPlanes: CLIP, transparent: opacity < 1, opacity }));
 		cone.position.copy(end).addScaledVector(direction, -head / 2);
 		cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
 		stage.content.add(cone);
 	};
 
+	// Far enough to cross the whole box from the origin, wherever the box sits; the box clips the rest.
+	const reach = 2 * Math.hypot(Math.max(Math.abs(box.xMin), Math.abs(box.xMax)), Math.max(Math.abs(box.yMin), Math.abs(box.yMax)), Math.max(Math.abs(box.zMin), Math.abs(box.zMax)));
+	const along = (b: readonly number[], amount: number, from: readonly number[] = [0, 0, 0]): Point3 => [from[0]! + b[0]! * amount, from[1]! + b[1]! * amount, from[2]! + b[2]! * amount];
+	/** What an orthonormal basis spans: a line for one direction, a plane for two. */
+	const addSpan = (basis: readonly (readonly number[])[], color: string, dashed = false) => {
+		const [a, b] = basis;
+		if (basis.length === 1 && a) addCurve([along(a, -reach), along(a, reach)], color, dashed);
+		if (basis.length === 2 && a && b) {
+			const corner = (s: number, t: number) => [a[0]! * s + b[0]! * t, a[1]! * s + b[1]! * t, a[2]! * s + b[2]! * t];
+			addMesh({ positions: [corner(-reach, -reach), corner(reach, -reach), corner(reach, reach), corner(-reach, reach)].flat(), indices: [0, 1, 2, 0, 2, 3] }, color, 0.45);
+		}
+	};
+	const addDot = (point: Point3, color: string, opacity = 1, onTop = false) => {
+		const [x, y, z] = norm(point);
+		if (Math.max(Math.abs(x), Math.abs(y), Math.abs(z)) > 1.001) return;
+		// `onTop`: seen through the surfaces around it (a meeting point sits inside three planes).
+		const dot = new THREE.Mesh(new THREE.SphereGeometry(0.035, 16, 12), new THREE.MeshPhongMaterial({ color, transparent: opacity < 1 || onTop, opacity, depthTest: !onTop }));
+		if (onTop) dot.renderOrder = 10;
+		dot.position.set(x, y, z);
+		stage.content.add(dot);
+	};
+	const labelAt = (point: Point3, text: string) => {
+		const at = new THREE.Vector3(...norm(point));
+		if (text && Math.max(Math.abs(at.x), Math.abs(at.y), Math.abs(at.z)) <= 1.001) labels.push({ at: at.multiplyScalar(1.06).add(new THREE.Vector3(0, 0, 0.06)), text, bold: true });
+	};
+	const apply = (m: readonly (readonly number[])[], p: readonly number[]): Point3 => [0, 1, 2].map((i) => m[i]![0]! * p[0]! + m[i]![1]! * p[1]! + m[i]![2]! * p[2]!) as Point3;
+
 	const resolved = resolvePlot(doc);
 	const ranges = parameterRanges(doc);
+	// A transformation moves the learner's named vectors and points; the first one showing is the one they follow.
+	const leading = resolved.lines.find((line, index) => line.kind === "transform" && !doc.lines[index]!.hidden);
+	const lead = leading?.kind === "transform" && leading.at > 0 && leading.matrix.length === 3 ? blendMatrix(leading.matrix, leading.at) : null;
+	const GHOST = 0.28;
 	for (const [index, line] of resolved.lines.entries()) {
 		const source = doc.lines[index]!;
 		if (source.hidden) continue;
@@ -160,39 +191,61 @@ function build(stage: Stage, doc: PlotDoc, width: number, height: number): void 
 				break;
 			case "vector": {
 				if (line.value.length !== 3 || !line.value.every(Number.isFinite)) break;
-				const tip = line.value as Point3;
-				if (line.guide && line.guide.from.length === 3 && line.guide.from.every(Number.isFinite)) addArrow(line.guide.from as Point3, tip, color, true);
+				// Only a named vector is carried by a transformation: a result such as A u already says where it lands.
+				const carried = lead !== null && line.name !== undefined;
+				const written = line.value as Point3;
+				const tip = carried ? apply(lead, written) : written;
+				if (carried) addArrow([0, 0, 0], written, color, false, GHOST);
+				if (line.guide && line.guide.from.length === 3 && line.guide.from.every(Number.isFinite)) addArrow(carried ? apply(lead, line.guide.from) : (line.guide.from as Point3), tip, color, true);
 				addArrow([0, 0, 0], tip, color);
-				const label = vectorLabel(line.name, source.text);
-				const at = new THREE.Vector3(...norm(tip));
-				if (label && Math.max(Math.abs(at.x), Math.abs(at.y), Math.abs(at.z)) <= 1.001) labels.push({ at: at.multiplyScalar(1.06).add(new THREE.Vector3(0, 0, 0.06)), text: label, bold: true });
+				labelAt(tip, vectorLabel(line.name, source.text));
 				break;
 			}
-			case "span": {
-				// Far enough to cross the whole box from the origin, wherever the box sits; the box clips the rest.
-				const reach = 2 * Math.hypot(Math.max(Math.abs(box.xMin), Math.abs(box.xMax)), Math.max(Math.abs(box.yMin), Math.abs(box.yMax)), Math.max(Math.abs(box.zMin), Math.abs(box.zMax)));
-				const along = (b: readonly number[], amount: number): Point3 => [b[0]! * amount, b[1]! * amount, b[2]! * amount];
-				const [a, b] = line.basis;
-				if (line.basis.length === 1 && a) addCurve([along(a, -reach), along(a, reach)], color);
-				if (line.basis.length === 2 && a && b) {
-					const corner = (s: number, t: number) => [a[0]! * s + b[0]! * t, a[1]! * s + b[1]! * t, a[2]! * s + b[2]! * t];
-					addMesh({ positions: [corner(-reach, -reach), corner(reach, -reach), corner(reach, reach), corner(-reach, reach)].flat(), indices: [0, 1, 2, 0, 2, 3] }, color, 0.45);
+			case "span":
+				addSpan(line.basis, color);
+				break;
+			case "transform": {
+				if (line.matrix.length !== 3) break;
+				const m = blendMatrix(line.matrix, line.at);
+				// The unit cube's twelve edges: its volume becomes |det|.
+				const corner = (bits: number): Point3 => apply(m, [bits & 1, (bits >> 1) & 1, (bits >> 2) & 1]);
+				for (let bits = 0; bits < 8; bits++) for (const axis of [1, 2, 4]) if (!(bits & axis)) addCurve([corner(bits), corner(bits | axis)], color, true);
+				for (const [name, unit] of [["î", [1, 0, 0]], ["ĵ", [0, 1, 0]], ["k̂", [0, 0, 1]]] as const) {
+					addArrow([0, 0, 0], apply(m, unit), color);
+					labelAt(apply(m, unit), name);
 				}
 				break;
 			}
+			case "eigen":
+				if (line.size !== 3) break;
+				// One direction is a line the matrix keeps on itself; two make a plane of them.
+				for (const pair of line.pairs) {
+					if (pair.vectors.length === 3) continue;
+					addSpan(spanBasis(pair.vectors), color, true);
+					if (pair.vectors.length === 1) labelAt(along(spanBasis(pair.vectors)[0]!, 0.85 * Math.min(half[0]!, half[1]!, half[2]!)), `λ = ${formatEntry(pair.value)}`);
+				}
+				break;
 			case "points3":
 				for (const point of line.points) {
 					if (!point.every(Number.isFinite)) continue;
-					const [x, y, z] = norm(point);
-					if (Math.max(Math.abs(x), Math.abs(y), Math.abs(z)) > 1.001) continue;
-					const dot = new THREE.Mesh(new THREE.SphereGeometry(0.035, 16, 12), new THREE.MeshPhongMaterial({ color }));
-					dot.position.set(x, y, z);
-					stage.content.add(dot);
+					if (lead) addDot(point, color, GHOST);
+					addDot(lead ? apply(lead, point) : point, color);
 				}
 				break;
 			default:
 				break;
 		}
+	}
+
+	// Where the planes meet: a marked point, or the line two of them share.
+	const meet = resolved.meet?.result;
+	if (meet?.kind === "point" && meet.at.length === 3) {
+		addDot(meet.at as Point3, "#a0a0a0", 1, true);
+		labelAt(meet.at as Point3, `(${meet.at.map(formatEntry).join(", ")})`);
+	}
+	if (meet?.kind === "line" && meet.point.length === 3) {
+		const direction = spanBasis([meet.direction])[0];
+		if (direction) addCurve([along(direction, -reach, meet.point), along(direction, reach, meet.point)], "#a0a0a0");
 	}
 
 	// Tick labels along three edges of the box, and the axis names beyond them.

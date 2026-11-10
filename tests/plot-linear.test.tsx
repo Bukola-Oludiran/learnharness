@@ -1,5 +1,5 @@
 /**
- * Vectors and matrices in the grapher (fork, phase 5d-1 — FORK.md): the
+ * Vectors and matrices in the grapher (fork, phases 5d-1 and 5d-2 — FORK.md): the
  * evaluator's rules, how lines of them are understood and read back to the
  * tutor, the two spellings, dragging, the keypad tab and the tool wording.
  */
@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
-	DEFAULT_VIEW, det, formatResult, inverse, latexToText, parseExpr, plotOutline, resolvePlot, spanBasis, textToLatex, tokenize, withVectorValue,
+	blendMatrix, cleanPlotDoc, DEFAULT_VIEW, det, eigen, formatResult, solveSystem, withTransformAt, inverse, latexToText, parseExpr, plotOutline, resolvePlot, spanBasis, textToLatex, tokenize, withVectorValue,
 	type PlotDoc, type ResolvedLine,
 } from "../src/core/plot/index.ts";
 import { createGraphTool, graphDocOf, graphResultText } from "../src/agent/tools/plot.ts";
@@ -218,7 +218,7 @@ describe("the grapher's rows, keys and tool for linear algebra", () => {
 		const { applyKey, Keypad, KEYPAD } = await import("../components/plot/keypad.tsx");
 		const html = renderToStaticMarkup(<Keypad onKey={noop} initialTab="vectors" />);
 		assert.match(html, /data-testid="keypad-tab-vectors"[^>]*aria-selected="true"/);
-		assert.equal(html.match(/data-testid="keypad-key"/g)!.length, 20 + 4);
+		assert.equal(html.match(/data-testid="keypad-key"/g)!.length, 24 + 4);
 		assert.match(html, /aria-label="vector with two entries"[\s\S]*aria-label="2 by 2 matrix"[\s\S]*aria-label="dot product"[\s\S]*aria-label="cross product"[\s\S]*aria-label="transpose"[\s\S]*aria-label="inverse"/);
 		const key = (label: string) => KEYPAD.vectors.keys.find((k) => k.label === label)!;
 		assert.deepEqual(applyKey("A = ", 4, 4, key("2×2")), { text: "A = [[, ], [, ]]", caret: 6 });
@@ -238,5 +238,150 @@ describe("the grapher's rows, keys and tool for linear algebra", () => {
 		assert.equal(graphResultText(shown), "Graph shown to the learner: 6 expressions.");
 		const broken = graphDocOf({ expressions: ["u = (2, 1)", "A = [[1, 2], [3, 4]]", "u + A"] });
 		assert.match(graphResultText(broken), /Could not be read \(fix and call again\):\n- "u \+ A": A vector with 2 entries and a 2 × 2 matrix cannot be added\./);
+	});
+});
+
+// ── Phase 5d-2: transformations, eigenvectors and systems ───────────────────
+describe("solving systems and finding eigenvectors", () => {
+	it("solves A x = b: one point, none, or a line of them", () => {
+		assert.equal(result(["solve([[2, 1], [1, -1]], (4, 1))"]), "(1.6667, 0.6667)");
+		assert.equal(result(["A = [[2, 1], [1, -1]]", "b = (4, 1)", "A solve(A, b)"]), "(4, 1)");
+		assert.equal(result(["solve([[1, 1], [2, 2]], (1, 3))"]), "error: This system has no solution.");
+		assert.equal(result(["solve([[1, 1], [2, 2]], (1, 2))"]), "error: This system has infinitely many solutions.");
+		assert.equal(result(["solve([[1, 1], [2, 2]], (1, 2, 3))"]), "error: solve(A, b) needs b to have one entry for each row of A: 2, not 3.");
+		assert.deepEqual(solveSystem([[1, 1], [1, -1], [2, 0]], [2, 0, 2]), { kind: "point", at: [1, 1] }, "more equations than unknowns, all agreeing");
+		assert.deepEqual(solveSystem([[1, 0, 0], [0, 1, 0]], [1, 2]), { kind: "many", point: [1, 2, 0], directions: [[0, 0, 1]] });
+	});
+
+	it("finds real eigenvalues, largest first, with eigenvectors whose largest entry is 1", () => {
+		assert.deepEqual(eigen([[2, 1], [1, 2]]), [{ value: 3, vectors: [[1, 1]] }, { value: 1, vectors: [[1, -1]] }]);
+		assert.deepEqual(eigen([[0, -1], [1, 0]]), [], "a rotation has none");
+		assert.deepEqual(eigen([[2, 0], [0, 2]]), [{ value: 2, vectors: [[1, 0], [0, 1]] }]);
+		assert.deepEqual(eigen([[1, 1], [0, 1]]), [{ value: 1, vectors: [[1, 0]] }], "a shear has one direction");
+		assert.deepEqual(eigen([[4, 1, 2], [0, 3, 1], [0, 0, 1]]).map((pair) => pair.value), [4, 3, 1]);
+		assert.deepEqual(eigen([[2, 0, 0], [0, 2, 0], [0, 0, 5]]), [{ value: 5, vectors: [[0, 0, 1]] }, { value: 2, vectors: [[1, 0, 0], [0, 1, 0]] }]);
+		assert.deepEqual(eigen([[0, -1, 0], [1, 0, 0], [0, 0, 1]]), [{ value: 1, vectors: [[0, 0, 1]] }], "a turn about z keeps only the axis");
+		// A v = λ v for a matrix with no tidy answers.
+		const m = [[1, 2, 3], [4, 5, 6], [7, 8, 10]];
+		const pairs = eigen(m);
+		assert.equal(pairs.length, 3);
+		for (const { value, vectors } of pairs) {
+			const v = vectors[0]!;
+			m.forEach((row, i) => assert.ok(Math.abs(row.reduce((sum, x, j) => sum + x * v[j]!, 0) - value * v[i]!) < 1e-7));
+		}
+		assert.throws(() => eigen([[1, 2, 3], [4, 5, 6]]), /2 × 2 and 3 × 3/);
+	});
+});
+
+describe("transform, eigen and meeting points as lines", () => {
+	it("a transform line keeps its slider position and blends from the identity", () => {
+		const base = doc(["A = [[2, 1], [1, 2]]", "transform(A)"]);
+		assert.deepEqual(resolvePlot(base).lines[1], { id: "l2", kind: "transform", matrix: [[2, 1], [1, 2]], at: 1, det: 3 });
+		const half = withTransformAt(base, "l2", 0.5004);
+		assert.equal(half.lines[1]!.at, 0.5);
+		assert.equal((resolvePlot(half).lines[1] as { at: number }).at, 0.5);
+		assert.deepEqual(blendMatrix([[2, 1], [1, 2]], 0.5), [[1.5, 0.5], [0.5, 1.5]]);
+		assert.deepEqual(blendMatrix([[2, 1], [1, 2]], 0), [[1, 0], [0, 1]]);
+		assert.equal(withTransformAt(base, "l2", 7).lines[1]!.at, 1);
+		// The position survives a save; "after" is the default and is not stored.
+		assert.equal(cleanPlotDoc(half)!.lines[1]!.at, 0.5);
+		assert.equal(cleanPlotDoc(withTransformAt(base, "l2", 1))!.lines[1]!.at, undefined);
+		assert.equal(cleanPlotDoc({ lines: [{ text: "transform(A)", at: -3 }] })!.lines[0]!.at, undefined);
+	});
+
+	it("a transform needs a matrix that fits the graph", () => {
+		assert.deepEqual(last(["transform([[1, 0, 0], [0, 1, 0], [0, 0, 1]])"]), { id: "l1", kind: "error", error: "On a 2D graph transform needs a 2 × 2 matrix; this one is 3 × 3.", fix: "3d" });
+		assert.deepEqual(last(["transform([[1, 0], [0, 1]])"], { mode: "3d" }), { id: "l1", kind: "error", error: "On a 3D graph transform needs a 3 × 3 matrix; this one is 2 × 2.", fix: "2d" });
+		assert.equal(result(["transform((1, 2))"]), "error: transform needs a matrix, such as transform(A).");
+		assert.equal(result(["A = [[1, 0], [0, 1]]", "2 transform(A)"]), "error: transform(…) goes on a line of its own.");
+		assert.equal(last(["transform([[1, 0, 0], [0, 2, 0], [0, 0, 3]])"], { mode: "3d" }).kind, "transform");
+	});
+
+	it("an eigen line says each eigenvalue in words", () => {
+		assert.deepEqual((last(["eigen([[2, 1], [1, 2]])"]) as { rows: string[] }).rows, ["λ = 3: (1, 1)", "λ = 1: (1, -1)"]);
+		assert.deepEqual((last(["eigen([[0, -1], [1, 0]])"]) as { rows: string[] }).rows, ["no real eigenvalues"]);
+		assert.deepEqual((last(["eigen([[2, 0], [0, 2]])"]) as { rows: string[] }).rows, ["λ = 2: every vector"]);
+		assert.deepEqual((last(["eigen([[2, 0, 0], [0, 2, 0], [0, 0, 5]])"], { mode: "3d" }) as { rows: string[] }).rows, ["λ = 5: (0, 0, 1)", "λ = 2: every vector in the plane of (1, 0, 0) and (0, 1, 0)"]);
+		assert.equal(result(["eigen([[1, 2, 3], [4, 5, 6]])"]), "error: eigen works on 2 × 2 and 3 × 3 matrices.");
+	});
+
+	it("marks where straight lines meet, however they are written, and ignores curves and hidden lines", () => {
+		const meet = (lines: string[], extra: Partial<PlotDoc> = {}) => resolvePlot(doc(lines, extra)).meet;
+		const at = meet(["2x + y = 4", "y = x^2", "x - y = 1"])!;
+		assert.deepEqual(at.lines, [0, 2]);
+		assert.ok(at.result.kind === "point" && Math.abs(at.result.at[0]! - 5 / 3) < 1e-9 && Math.abs(at.result.at[1]! - 2 / 3) < 1e-9);
+		assert.deepEqual(meet(["y = 2x + 1", "x = 3"])!.result, { kind: "point", at: [3, 7] });
+		assert.deepEqual(meet(["a = 2", "y = a x", "2x - 1"])!.result, { kind: "none" }, "a bare 2x − 1 is y = 2x − 1, parallel to y = a x while a is 2");
+		const withSlider = meet(["a = 3", "y = a x", "2x - 1"])!.result;
+		assert.ok(withSlider.kind === "point" && Math.abs(withSlider.at[0]! + 1) < 1e-9 && Math.abs(withSlider.at[1]! + 3) < 1e-9, "a slider's value counts");
+		assert.deepEqual(meet(["y = 2x + 1", "y = 2x - 3"])!.result, { kind: "none" });
+		assert.deepEqual(meet(["y = x", "y = -x", "y = 2x"])!.result, { kind: "point", at: [0, 0] });
+		assert.deepEqual(meet(["y = x", "y = -x", "y = 2x + 1"])!.result, { kind: "none" }, "three lines that make a triangle");
+		assert.equal(meet(["y = x"]), undefined);
+		assert.equal(meet(["y = x", "y = sin(x)"]), undefined);
+		const hidden = { ...doc(["y = x", "y = -x + 2"]) };
+		hidden.lines[1] = { ...hidden.lines[1]!, hidden: true };
+		assert.equal(resolvePlot(hidden).meet, undefined);
+	});
+
+	it("in 3D three planes meet at a point and two in a line", () => {
+		const three = { mode: "3d" as const };
+		const meet = (lines: string[]) => resolvePlot(doc(lines, three)).meet!;
+		const point = meet(["x + y + z = 6", "z = x - y", "y = 1"]).result;
+		assert.ok(point.kind === "point" && point.at.every((value, i) => Math.abs(value - [3, 1, 2][i]!) < 1e-9));
+		const line = meet(["x + y + z = 6", "z = x - y"]).result;
+		assert.ok(line.kind === "line");
+		// Every point of it lies on both planes.
+		for (const s of [0, 1, -2.5]) {
+			const [x, y, z] = line.point.map((p, i) => p + s * line.direction[i]!) as [number, number, number];
+			assert.ok(Math.abs(x + y + z - 6) < 1e-9 && Math.abs(z - (x - y)) < 1e-9);
+		}
+		assert.deepEqual(meet(["z = 1", "z = 2"]).result, { kind: "none" });
+		assert.equal(resolvePlot(doc(["z = x^2 + y^2", "z = 1"], three)).meet, undefined);
+	});
+
+	it("reads back to the tutor as approved", () => {
+		const d = doc(["A = [[2, 1], [1, 2]]", "2x + y = 4", "x - y = 1", "transform(A)", "eigen(A)", "", "solve([[2, 1], [1, -1]], (4, 1))"]);
+		assert.equal(
+			plotOutline(withTransformAt(d, "l4", 0.5)),
+			[
+				"1. A = [[2, 1], [1, 2]]",
+				"2. 2x + y = 4",
+				"3. x - y = 1",
+				"4. transform(A) (slider at 0.5, where 0 is before and 1 is after; det = 3)",
+				"5. eigen(A) (λ = 3: (1, 1); λ = 1: (1, -1))",
+				"6. solve([[2, 1], [1, -1]], (4, 1)) (= (1.6667, 0.6667))",
+				"Lines 2 and 3 meet at (1.6667, 0.6667).",
+				"View: x from -10 to 10, y from -10 to 10",
+			].join("\n"),
+		);
+		assert.match(plotOutline(doc(["y = 2x + 1", "y = 2x - 3", "x = 0"])), /\nLines 1, 2 and 3 do not meet at one point\.\n/);
+		assert.match(plotOutline(doc(["x + y + z = 6", "z = x - y"], { mode: "3d" })), /\nPlanes 1 and 2 meet in a line\.\n/);
+	});
+
+	it("the row shows the before/after slider with its determinant, and eigenvalues one per line", async () => {
+		const { ExpressionRow } = await import("../components/plot/grapher.tsx");
+		const row = (lines: string[]) => {
+			const d = doc(lines);
+			const index = d.lines.length - 1;
+			return renderToStaticMarkup(
+				<ExpressionRow line={d.lines[index]!} meaning={resolvePlot(d).lines[index]!} index={index} onText={noop} onToggle={noop} onRemove={noop} onEnter={noop} onSlider={noop} onRange={noop} onAddSlider={noop} />,
+			);
+		};
+		const transform = row([A, "transform(A)"]);
+		assert.match(transform, /data-kind="transform"[\s\S]*data-testid="plot-transform-play"[\s\S]*before[\s\S]*type="range"[^>]*min="0"[^>]*max="1"[^>]*value="1"[\s\S]*after[\s\S]*det = (<!-- -->)?-2</);
+		assert.match(row(["eigen([[2, 1], [1, 2]])"]), /data-kind="eigen"[\s\S]*<p>λ = 3: \(1, 1\)<\/p><p>λ = 1: \(1, -1\)<\/p>/);
+	});
+
+	it("the tutor's card carries the slider, and the tool the approved sentences", async () => {
+		const { GraphCardBody } = await import("../components/artifacts/graph-card.tsx");
+		const card = renderToStaticMarkup(<GraphCardBody initial={cleanPlotDoc(doc([A, "transform(A)"]))!} />);
+		assert.match(card, /data-testid="plot-transform"/);
+		assert.doesNotMatch(renderToStaticMarkup(<GraphCardBody initial={cleanPlotDoc(doc([A, "det(A)"]))!} />), /plot-transform/);
+		assert.match(
+			createGraphTool().description,
+			/shows its value\. To show what a matrix does, add transform\(A\): the grid, the unit square and the named vectors move to where A sends them, and the learner drags a slider between before and after\. eigen\(A\) draws the eigenvector lines of a 2 by 2 or 3 by 3 matrix and shows its eigenvalues\. solve\(A, b\) gives the solution of A x = b\. When a graph has two or more straight-line equations \(planes in 3D\), the point where they meet is marked\./,
+		);
+		assert.equal(graphResultText(graphDocOf({ expressions: ["A = [[2, 1], [1, 2]]", "transform(A)", "eigen(A)", "solve(A, (1, 2))"] })), "Graph shown to the learner: 4 expressions.");
 	});
 });

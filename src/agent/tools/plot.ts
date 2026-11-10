@@ -14,7 +14,7 @@ import { cleanPlotDoc, DEFINITION_START, MAX_LINE_CHARS, resolvePlot, type PlotD
  * → GraphCard). The tutor's result is text: what was shown, and any line
  * that could not be read. Description approved by the owner, 2026-11-10
  * (the 3D paragraph the same day, phase 5c; the calculus sentence, phase 5c3; the
- * linear algebra paragraph, phase 5d).
+ * linear algebra paragraph, phase 5d, with its sentences on transform, eigen, solve and meeting points from 5d-2).
  */
 
 export const MAX_GRAPH_EXPRESSIONS = 20;
@@ -116,7 +116,10 @@ export function createGraphTool(): AgentTool<typeof graphInput> {
 			"For linear algebra, name a vector with v = (2, 1) (three numbers on a 3D graph) and a matrix with A = [[1, 2], [3, 4]], one inner list per row. " +
 				"A named vector is drawn as an arrow from the origin. Then write expressions with them on their own lines: " +
 				"u + v, 2u - v, A v, A B, A^2, A^-1, A^T, dot(u, v), cross(u, v), norm(v), det(A), trace(A), and span(u) or span(u, v). " +
-				"A line that gives a vector is drawn; a line that gives a number or a matrix shows its value.",
+				"A line that gives a vector is drawn; a line that gives a number or a matrix shows its value. " +
+				"To show what a matrix does, add transform(A): the grid, the unit square and the named vectors move to where A sends them, and the learner drags a slider between before and after. " +
+				"eigen(A) draws the eigenvector lines of a 2 by 2 or 3 by 3 matrix and shows its eigenvalues. solve(A, b) gives the solution of A x = b. " +
+				"When a graph has two or more straight-line equations (planes in 3D), the point where they meet is marked.",
 			"Use it when seeing the curve teaches something: how a parameter changes a shape, where two curves meet, what a transformation does. " +
 				"The result names any expression that could not be read; fix it and call again.",
 		].join("\n\n"),

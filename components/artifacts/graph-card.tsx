@@ -4,8 +4,8 @@ import { useState } from "react";
 import { MaximizeIcon } from "lucide-react";
 import { ToolCallCard } from "@/components/artifacts/tool-call-card";
 import { GrapherOverlay } from "@/components/plot/grapher-overlay";
-import { PlotSurface } from "@/components/plot/grapher";
-import { cleanPlotDoc, DEFAULT_SLIDER, PLOT_COLORS, resolvePlot, withSliderValue, type ArtifactPartProps, type PlotDoc } from "@/src/core";
+import { PlotSurface, TransformSlider } from "@/components/plot/grapher";
+import { cleanPlotDoc, DEFAULT_SLIDER, PLOT_COLORS, resolvePlot, withSliderValue, withTransformAt, type ArtifactPartProps, type PlotDoc } from "@/src/core";
 
 /**
  * The graph card (fork, phase 5b — see FORK.md): a graph the tutor placed
@@ -21,6 +21,7 @@ export function GraphCardBody({ initial }: { initial: PlotDoc }) {
 	const [open, setOpen] = useState(false);
 	const resolved = resolvePlot(doc);
 	const sliders = resolved.lines.flatMap((line, index) => (line.kind === "definition" && line.slider ? [{ line, source: doc.lines[index]!, index }] : []));
+	const transforms = resolved.lines.flatMap((line, index) => (line.kind === "transform" && !doc.lines[index]!.hidden ? [{ line, source: doc.lines[index]!, index }] : []));
 	const shown = doc.lines.filter((line, index) => line.text.trim() && resolved.lines[index]!.kind !== "definition" && resolved.lines[index]!.kind !== "error");
 	return (
 		<figure data-testid="graph-card" className="my-3 w-full max-w-2xl overflow-hidden rounded-lg border border-border">
@@ -50,6 +51,15 @@ export function GraphCardBody({ initial }: { initial: PlotDoc }) {
 							</label>
 						);
 					})}
+				</div>
+			)}
+			{transforms.length > 0 && (
+				<div className="border-t border-border px-3 py-2">
+					{transforms.map(({ line, source, index }) => (
+						<div key={source.id} className="py-0.5">
+							<TransformSlider at={line.at} color={PLOT_COLORS[(source.color ?? index) % PLOT_COLORS.length]!} onAt={(at) => setDoc(withTransformAt(doc, source.id, at))} />
+						</div>
+					))}
 				</div>
 			)}
 			<figcaption className="flex items-start gap-3 border-t border-border px-3 py-2 text-xs text-muted-foreground">

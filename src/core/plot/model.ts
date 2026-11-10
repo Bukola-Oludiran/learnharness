@@ -20,13 +20,21 @@
  * `det(A)`) is evaluated by linalg.ts: a vector is drawn, a number or a
  * matrix is shown as its value. `span(u, v)` draws what the vectors span.
  *
+ * The visual tools (phase 5d-2) are lines too: `transform(A)` shows what a
+ * matrix does, with a before/after slider whose position the line keeps
+ * (`at`); `eigen(A)` draws eigenvector lines and lists eigenvalues. Where
+ * the graph's straight lines (planes in 3D) meet is worked out for the
+ * whole graph and marked (`ResolvedPlot.meet`).
+ *
  * The document records its mode and each resolved line its kind, so new
  * kinds extend the format. The same line can mean different things in the
  * two modes: `x^2 + y^2 = 4` is a circle in 2D and a cylinder in 3D.
  */
 
 import { compile as compileExpr, ExprError, isConstantName, parseTokens, splitEquation, tokenize, variablesOf, type Compiled, type Expr, type Scope, type UserFunction } from "./expr.ts";
-import { evaluate, formatEntry, involvesLinear, isMatrix, spanBasis, withTranspose, type LinearEnv, type Matrix, type Value, type Vector } from "./linalg.ts";
+import {
+	det, eigen, evaluate, formatEntry, involvesLinear, isMatrix, solveSystem, spanBasis, withTranspose, type Eigenpair, type LinearEnv, type Matrix, type Value, type Vector,
+} from "./linalg.ts";
 
 export interface PlotView {
 	xMin: number;
@@ -50,6 +58,8 @@ export interface PlotLine {
 	latex?: string;
 	/** Why the editor's contents could not be turned into `text`. */
 	problem?: string;
+	/** A transform line's slider: 0 is before, 1 (and absent) is after. */
+	at?: number;
 }
 
 /** The box a 3D graph shows. */
@@ -111,6 +121,10 @@ export type ResolvedLine =
 	| { id: string; kind: "matrix"; name?: string; value: Matrix; literal: boolean }
 	/** What vectors span: `basis` is orthonormal (one vector: a line; two in 3D: a plane); `note` says it in words. */
 	| { id: string; kind: "span"; basis: Vector[]; note: string }
+	/** transform(A) (phase 5d-2): the grid, the unit square and the named vectors, moved `at` of the way from where they are to where A sends them. */
+	| { id: string; kind: "transform"; matrix: Matrix; at: number; det: number }
+	/** eigen(A): the real eigenvalues with their eigenvectors; `rows` says each in words. Drawn when the matrix's size fits the graph. */
+	| { id: string; kind: "eigen"; pairs: Eigenpair[]; size: number; rows: string[] }
 	/** A function definition that is not itself drawn (f(t) = … on a 2D graph still defines f). */
 	| { id: string; kind: "function"; name: string; params: string[] }
 	/** A line with no variables: a calculation, shown as its value and not drawn. */
@@ -151,12 +165,14 @@ interface LinearDraft {
 	first?: ValueOf;
 }
 type Draft =
-	| DistributiveOmit<Exclude<ResolvedLine, { kind: "points" | "points3" | "value" | "vector" | "matrix" | "span" }>, "id">
+	| DistributiveOmit<Exclude<ResolvedLine, { kind: "points" | "points3" | "value" | "vector" | "matrix" | "span" | "transform" | "eigen" }>, "id">
 	| { kind: "value"; fn: Compiled }
 	| { kind: "points"; fns: [Compiled, Compiled][] }
 	| { kind: "points3"; fns: [Compiled, Compiled, Compiled][] }
 	| LinearDraft
-	| { kind: "span-of"; vectors: ValueOf[] };
+	| { kind: "span-of"; vectors: ValueOf[] }
+	| { kind: "transform-of"; matrix: ValueOf }
+	| { kind: "eigen-of"; matrix: ValueOf };
 type Classified = { line: Draft; define?: { name: string; value: ValueOf } };
 
 /** The graph's own functions: the names (known before any body is parsed,
@@ -228,6 +244,11 @@ function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode, de
 	const isNumeral = (expr: Expr) => expr.type === "num" || (expr.type === "neg" && expr.arg.type === "num");
 	const valueLine = (expr: Expr, name?: string): Draft => {
 		check(expr, []);
+		if (!name && expr.type === "call" && (expr.fn === "transform" || expr.fn === "eigen")) {
+			const of = expr.args[0]!;
+			const matrix = (scope: Scope) => evaluate(of, scope, env);
+			return expr.fn === "transform" ? { kind: "transform-of", matrix } : { kind: "eigen-of", matrix };
+		}
 		if (!name && expr.type === "call" && expr.fn === "span") return { kind: "span-of", vectors: expr.args.map((arg) => (scope: Scope) => evaluate(arg, scope, env)) };
 		const literal = (expr.type === "tuple" && expr.items.every(isNumeral)) || (expr.type === "matrix" && expr.rows.every((row) => row.every(isNumeral)));
 		const sum = expr.type === "bin" && expr.op === "+" ? expr.left : null;
@@ -380,6 +401,8 @@ function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode, de
 }
 
 export interface ResolvedPlot {
+	/** Where the straight lines or planes meet, when the graph has two or more. */
+	meet?: Meet;
 	lines: ResolvedLine[];
 	/** The values of every definition, by name. */
 	scope: Scope;
@@ -458,8 +481,10 @@ export function resolvePlot(doc: Pick<PlotDoc, "lines"> & { mode?: PlotMode }): 
 		if (done) return { id: line.id, ...done };
 		const draft = tryClassify(line);
 		if ("error" in draft) return { id: line.id, kind: "error", error: draft.error, ...(draft.fix ? { fix: draft.fix } : {}) };
-		if (draft.line.kind === "linear" || draft.line.kind === "span-of") {
+		if (draft.line.kind === "linear" || draft.line.kind === "span-of" || draft.line.kind === "transform-of" || draft.line.kind === "eigen-of") {
 			try {
+				if (draft.line.kind === "transform-of") return { id: line.id, ...settleTransform(draft.line.matrix(scope), mode, line.at) };
+				if (draft.line.kind === "eigen-of") return { id: line.id, ...settleEigen(draft.line.matrix(scope)) };
 				if (draft.line.kind === "span-of") return { id: line.id, ...settleSpan(draft.line.vectors.map((vector) => vector(scope)), mode) };
 				const value = draft.line.value(scope);
 				// A definition that reaches here never settled above.
@@ -475,7 +500,70 @@ export function resolvePlot(doc: Pick<PlotDoc, "lines"> & { mode?: PlotMode }): 
 		if (draft.line.kind === "definition") return { id: line.id, kind: "error", error: "This definition could not be used." };
 		return { id: line.id, ...draft.line };
 	});
-	return { lines, scope, costly: new Set(doc.lines.filter((line) => COSTLY.test(line.text)).map((line) => line.id)) };
+	const meet = meetOf(lines, doc.lines, scope, mode);
+	return { lines, scope, costly: new Set(doc.lines.filter((line) => COSTLY.test(line.text)).map((line) => line.id)), ...(meet ? { meet } : {}) };
+}
+
+/** Where the graph's straight lines (planes in 3D) meet. */
+export interface Meet {
+	/** Indexes into the document's lines of the equations involved. */
+	lines: number[];
+	result: { kind: "point"; at: Vector } | { kind: "line"; point: Vector; direction: Vector } | { kind: "none" };
+}
+
+/** a·x + b·y (+ c·z) = d for a line that is straight, read off its compiled form by sampling; null for a curve. */
+function straightRow(line: ResolvedLine, scope: Scope, mode: PlotMode): { row: Vector; rhs: number } | null {
+	const names = mode === "3d" ? (["x", "y", "z"] as const) : (["x", "y"] as const);
+	let f: ((point: readonly number[]) => number) | null = null;
+	const at = (fn: Compiled) => (point: readonly number[]) => {
+		const local: Scope = Object.create(scope);
+		names.forEach((name, i) => {
+			local[name] = point[i]!;
+		});
+		return fn(local);
+	};
+	// Each kind as F(point) = 0.
+	if ((mode === "2d" && line.kind === "implicit") || (mode === "3d" && line.kind === "implicit3")) f = at(line.fn);
+	else if (mode === "2d" && (line.kind === "explicit-y" || line.kind === "explicit-x")) {
+		const value = at(line.fn);
+		const axis = line.kind === "explicit-y" ? 1 : 0;
+		f = (point) => value(point) - point[axis]!;
+	} else if (mode === "3d" && line.kind === "surface") {
+		const value = at(line.fn);
+		const axis = (names as readonly string[]).indexOf(line.axis);
+		f = (point) => value(point) - point[axis]!;
+	}
+	if (!f) return null;
+	const origin = names.map(() => 0);
+	const constant = f(origin);
+	const row = names.map((_, i) => f!(origin.map((_, j) => (i === j ? 1 : 0))) - constant);
+	if (!Number.isFinite(constant) || row.some((x) => !Number.isFinite(x)) || row.every((x) => Math.abs(x) < 1e-12)) return null;
+	// Straight means the same slope everywhere: check away from where it was measured.
+	const size = Math.max(Math.abs(constant), ...row.map(Math.abs), 1);
+	for (const point of [[2, 3, -1.5], [-1.5, 0.7, 4], [5, -4, 2.5], [-7.3, -2.1, -6]]) {
+		const expected = constant + row.reduce((sum, x, i) => sum + x * point[i]!, 0);
+		if (!(Math.abs(f(point.slice(0, names.length)) - expected) <= 1e-8 * size * 10)) return null;
+	}
+	return { row, rhs: -constant };
+}
+
+function meetOf(resolved: readonly ResolvedLine[], source: readonly PlotLine[], scope: Scope, mode: PlotMode): Meet | null {
+	const rows: Vector[] = [];
+	const rhs: number[] = [];
+	const lines: number[] = [];
+	resolved.forEach((line, index) => {
+		const straight = source[index]!.hidden ? null : straightRow(line, scope, mode);
+		if (!straight) return;
+		rows.push(straight.row);
+		rhs.push(straight.rhs);
+		lines.push(index);
+	});
+	if (lines.length < 2) return null;
+	const solution = solveSystem(rows, rhs);
+	if (solution.kind === "point") return { lines, result: solution };
+	// Two planes share a line; so may three. Lines in the plane that coincide meet nowhere in particular.
+	if (solution.kind === "many" && mode === "3d" && solution.directions.length === 1) return { lines, result: { kind: "line", point: solution.point, direction: solution.directions[0]! } };
+	return { lines, result: { kind: "none" } };
 }
 
 /** A vector's entries must match the graph for it to be drawn; one made for the other mode says so. */
@@ -500,6 +588,34 @@ function settleLinear(draft: LinearDraft, value: Value, scope: Scope, mode: Plot
 		// no guide
 	}
 	return { kind: "vector", ...name, value, literal: draft.literal, draggable: draft.literal && draft.name !== undefined && mode === "2d" && value.length === 2, ...(guide ? { guide } : {}) };
+}
+
+function settleTransform(value: Value, mode: PlotMode, at: number | undefined): Settled {
+	const size = mode === "3d" ? 3 : 2;
+	if (typeof value === "number" || !isMatrix(value)) throw new ExprError("transform needs a matrix, such as transform(A).");
+	if (value.length !== size || value[0]!.length !== size) {
+		const other = mode === "3d" ? 2 : 3;
+		const error = `On a ${mode.toUpperCase()} graph transform needs a ${size} × ${size} matrix; this one is ${value.length} × ${value[0]!.length}.`;
+		return value.length === other && value[0]!.length === other ? { kind: "error", error, fix: mode === "3d" ? "2d" : "3d" } : { kind: "error", error };
+	}
+	return { kind: "transform", matrix: value, at: typeof at === "number" && at >= 0 && at <= 1 ? at : 1, det: det(value) };
+}
+
+/** The matrix a transform line shows at its slider's position: a straight blend from the identity to A. */
+export function blendMatrix(matrix: Matrix, at: number): Matrix {
+	return matrix.map((row, i) => row.map((x, j) => (1 - at) * (i === j ? 1 : 0) + at * x));
+}
+
+function settleEigen(value: Value): Settled {
+	if (typeof value === "number" || !isMatrix(value)) throw new ExprError("eigen needs a matrix, such as eigen(A).");
+	const pairs = eigen(value);
+	const size = value.length;
+	const rows = pairs.map(({ value: lambda, vectors }) => {
+		const shown = vectors.map((vector) => formatResult(vector));
+		const what = vectors.length === size ? "every vector" : vectors.length === 1 ? shown[0]! : `every vector in the plane of ${shown.join(" and ")}`;
+		return `λ = ${formatEntry(lambda)}: ${what}`;
+	});
+	return { kind: "eigen", pairs, size, rows: rows.length > 0 ? rows : ["no real eigenvalues"] };
 }
 
 function settleSpan(values: Value[], mode: PlotMode): Settled {
@@ -554,6 +670,12 @@ export function withVectorValue(doc: PlotDoc, lineId: string, value: readonly nu
 	};
 }
 
+/** Move a transform line's before/after slider. */
+export function withTransformAt(doc: PlotDoc, lineId: string, at: number): PlotDoc {
+	const clamped = Math.max(0, Math.min(1, Math.round(at * 1000) / 1000));
+	return { ...doc, lines: doc.lines.map((line) => (line.id === lineId ? { ...line, at: clamped } : line)) };
+}
+
 /** Replace a definition line's number (a dragged slider). */
 export function withSliderValue(doc: PlotDoc, lineId: string, value: number): PlotDoc {
 	return {
@@ -584,6 +706,7 @@ export function cleanPlotDoc(raw: unknown): PlotDoc | null {
 			color: Number.isInteger(line.color) ? Math.abs(line.color as number) % PLOT_COLORS.length : index % PLOT_COLORS.length,
 			...(line.hidden === true ? { hidden: true } : {}),
 			...(min !== undefined && max !== undefined && min < max ? { min, max } : {}),
+			...(typeof line.at === "number" && line.at >= 0 && line.at < 1 ? { at: line.at } : {}),
 		});
 	}
 	const view = cleanView(input.view);
@@ -647,19 +770,25 @@ export function nextLineId(doc: Pick<PlotDoc, "lines">): string {
 export function plotOutline(doc: PlotDoc): string {
 	const resolved = resolvePlot(doc);
 	const rows: string[] = [];
+	/** Document line index → its number in the outline. */
+	const numberOf = new Map<number, number>();
 	for (const [index, line] of doc.lines.entries()) {
 		if (!line.text.trim()) continue;
+		numberOf.set(index, rows.length + 1);
 		const meaning = resolved.lines[index]!;
 		const notes: string[] = [];
 		if (meaning.kind === "definition" && meaning.slider) notes.push(`slider, from ${fmt(line.min ?? DEFAULT_SLIDER.min)} to ${fmt(line.max ?? DEFAULT_SLIDER.max)}`);
 		if (meaning.kind === "value" || (meaning.kind === "definition" && !meaning.slider)) notes.push(`= ${formatValue(meaning.value)}`);
 		if ((meaning.kind === "vector" || meaning.kind === "matrix") && !meaning.literal) notes.push(`= ${formatResult(meaning.value)}`);
 		if (meaning.kind === "span") notes.push(`= ${meaning.note}`);
+		if (meaning.kind === "transform") notes.push(`slider at ${fmt(meaning.at)}, where 0 is before and 1 is after; det = ${formatValue(meaning.det)}`);
+		if (meaning.kind === "eigen") notes.push(meaning.rows.join("; "));
 		if (meaning.kind === "error") notes.push(`could not be read: ${meaning.error}`);
 		if (line.hidden) notes.push("hidden");
 		rows.push(`${rows.length + 1}. ${line.text.trim()}${notes.length > 0 ? ` (${notes.join("; ")})` : ""}`);
 	}
 	if (rows.length === 0) return "";
+	if (resolved.meet) rows.push(meetSentence(resolved.meet, numberOf, doc.mode));
 	if (doc.angles === "degrees") rows.unshift("Angles in degrees.");
 	if (doc.mode === "3d") {
 		const box = doc.box ?? DEFAULT_BOX;
@@ -667,6 +796,16 @@ export function plotOutline(doc: PlotDoc): string {
 	}
 	const { xMin, xMax, yMin, yMax } = doc.view;
 	return [...rows, `View: x from ${fmt(xMin)} to ${fmt(xMax)}, y from ${fmt(yMin)} to ${fmt(yMax)}`].join("\n");
+}
+
+/** "Lines 2 and 3 meet at (1.6667, 0.6667)." */
+function meetSentence(meet: Meet, numberOf: ReadonlyMap<number, number>, mode: PlotMode): string {
+	const numbers = meet.lines.map((index) => String(numberOf.get(index) ?? index + 1));
+	const list = numbers.length === 2 ? numbers.join(" and ") : `${numbers.slice(0, -1).join(", ")} and ${numbers.at(-1)}`;
+	const what = mode === "3d" ? "Planes" : "Lines";
+	if (meet.result.kind === "point") return `${what} ${list} meet at ${formatResult(meet.result.at)}.`;
+	if (meet.result.kind === "line") return `${what} ${list} meet in a line.`;
+	return `${what} ${list} do not meet at one point.`;
 }
 
 /** The text block before a graph's picture in the tutor's input (wording
