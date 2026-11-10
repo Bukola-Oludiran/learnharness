@@ -37,7 +37,7 @@ const MAX_PICTURE_REUSE = 3;
 export const MAX_DECK_PICTURES = 40;
 const PICTURE_EXTENSIONS = /\.(png|jpe?g|gif|bmp|webp)$/i;
 
-function decodeXml(text: string): string {
+export function decodeXml(text: string): string {
 	return text
 		.replace(/&lt;/g, "<")
 		.replace(/&gt;/g, ">")

@@ -80,6 +80,11 @@ Add one row per edit, in the same pull request that makes it.
 - In-lesson quiz answers are not recorded as evidence yet, and idea states do not yet steer probing or practice.
 - Deleting a material removes its stored file and record only. Ideas it added stay in the graph; upstream's source deletion removes those.
 - Material conversion runs in the server process. A restart mid-run leaves the record `processing` with no worker; it reads as interrupted and Retry starts over from the stored original.
+- The library (`/library`) lists every material; a material uploaded there belongs to no course and cannot yet be attached to one. Its sidebar link lives in the fork's own `components/courses-section.tsx`, so `components/sidebar.tsx` gains no further edit.
+- A folder upload makes one material per file. A marked test photographed as several images must go through "Upload marked test" so its pages stay together. The checklist's pre-selection reads the file name only; the server still checks the bytes.
+- Two library uploads with the same folder path and file name share one graph source (the source id is a hash of the path), as a re-import does upstream.
+- At most two materials convert or extract at once; the rest wait as `queued`. The queue lives in the server process, so a restart leaves waiting materials interrupted; "Retry all failed" restarts them.
+- Word (.docx) reading takes body paragraphs, headings and tables. Headers, footers, footnotes, comments and text boxes are not read; pictures are transcribed after the text, not at their place in it.
 - Vision transcription usage is not written to any usage log (upstream's notes pipeline logs its own extraction usage on the source record).
 
 ## Local app

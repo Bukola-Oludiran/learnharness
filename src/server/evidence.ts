@@ -80,7 +80,7 @@ function sourceOf(entry: Evidence, labels: Map<string, IdeaResult["source"]>): I
 	let source: IdeaResult["source"] = { label: entry.from === "test" ? "A deleted test" : "A deleted session" };
 	if (entry.materialId) {
 		const material = stores.materialStore.getMaterial(entry.materialId);
-		if (material) source = { label: material.title, href: `/course/${material.courseId}` };
+		if (material) source = { label: material.title, href: material.courseId ? `/course/${material.courseId}` : "/library" };
 	} else if (entry.chatId) {
 		const title = stores.chatStore.listChats().find((chat) => chat.id === entry.chatId)?.title;
 		if (title) source = { label: title, href: `/chat/${entry.chatId}` };

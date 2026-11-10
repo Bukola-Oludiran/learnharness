@@ -10,6 +10,7 @@ import { convertPdf } from "../../agent/subagents/pdf-ops.ts";
 import { getHeadless } from "../../agent/subagents/headless.ts";
 import type { MaterialFormat } from "../../core/contracts.ts";
 import type { TranscriptPart } from "../../core/material.ts";
+import { DocumentError, MAX_DOCUMENT_PICTURES, readDocument } from "./docx.ts";
 import { DeckError, MAX_DECK_PICTURES, readDeck } from "./pptx.ts";
 import type { Transcriber } from "./transcribe.ts";
 
@@ -70,6 +71,31 @@ async function convertDeck(path: string, transcribe: Transcriber, signal?: Abort
 	};
 }
 
+async function convertDocument(path: string, transcribe: Transcriber, signal?: AbortSignal): Promise<Conversion> {
+	let document;
+	try {
+		document = readDocument(await fs.readFile(path));
+	} catch (error) {
+		if (error instanceof DocumentError) throw new ConversionError(error.message);
+		throw error;
+	}
+	const parts: TranscriptPart[] = [{ label: "Document", text: document.text, aiRead: [] }];
+	for (const [index, picture] of document.pictures.entries()) {
+		signal?.throwIfAborted();
+		const label = `Picture ${index + 1}`;
+		parts.push({ label, text: "", aiRead: [await transcribe(picture.bytes, label, signal)] });
+	}
+	if (!parts.some((part) => part.text.trim() || part.aiRead.some((t) => t.trim()))) {
+		throw new ConversionError("No text or readable pictures were found in this document.");
+	}
+	return {
+		parts,
+		...(document.skippedPictures > 0
+			? { notice: `${plural(document.skippedPictures, "picture was", "pictures were")} not read (icons, unsupported formats, or over the ${MAX_DOCUMENT_PICTURES}-picture limit).` }
+			: {}),
+	};
+}
+
 async function convertPdfFile(path: string, transcribe: Transcriber, signal?: AbortSignal): Promise<Conversion> {
 	// pdfjs refuses a Node Buffer; it wants a plain Uint8Array.
 	const pdf = await convertPdf(new Uint8Array(await fs.readFile(path)), MAX_PDF_PAGES);
@@ -107,6 +133,8 @@ export async function convertMaterial(format: MaterialFormat, originalPath: stri
 			return convertImage(originalPath, transcribe, signal);
 		case "pptx":
 			return convertDeck(originalPath, transcribe, signal);
+		case "docx":
+			return convertDocument(originalPath, transcribe, signal);
 		case "pdf":
 			return convertPdfFile(originalPath, transcribe, signal);
 		case "epub":

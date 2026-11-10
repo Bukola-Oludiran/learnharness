@@ -109,9 +109,10 @@ describe("format detection and transcript assembly", () => {
 		assert.deepEqual(detectMaterialFormat("scan.pdf", PNG), { format: "image" });
 		assert.deepEqual(detectMaterialFormat("deck.pptx", zip), { format: "pptx" });
 		assert.deepEqual(detectMaterialFormat("notes.md", Buffer.from("# Title")), { format: "text" });
-		assert.match((detectMaterialFormat("essay.docx", zip) as { refused: string }).refused, /not supported/);
+		assert.deepEqual(detectMaterialFormat("essay.docx", zip), { format: "docx" });
+		assert.match((detectMaterialFormat("grades.xlsx", zip) as { refused: string }).refused, /not supported/);
 		assert.match((detectMaterialFormat("book.epub", zip) as { refused: string }).refused, /not supported yet/);
-		assert.match((detectMaterialFormat("old.ppt", Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0, 0])) as { refused: string }).refused, /Keynote or PowerPoint/);
+		assert.match((detectMaterialFormat("old.ppt", Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0, 0])) as { refused: string }).refused, /export it as \.pptx, \.docx or PDF/);
 		assert.match((detectMaterialFormat("blob.txt", Buffer.from([65, 0, 66])) as { refused: string }).refused, /text file/);
 		assert.match((detectMaterialFormat("empty.txt", new Uint8Array()) as { refused: string }).refused, /empty/);
 	});
@@ -217,7 +218,7 @@ describe("the materials service", () => {
 		throw new Error("material never settled");
 	}
 	const upload = (name: string, bytes: Uint8Array | string) => {
-		const outcome = service.uploadMaterial(course.id, name, Buffer.from(bytes));
+		const outcome = service.uploadMaterial({ courseId: course.id }, name, Buffer.from(bytes));
 		assert.ok(outcome.ok, JSON.stringify(outcome));
 		return outcome.material;
 	};
@@ -253,9 +254,9 @@ describe("the materials service", () => {
 	it("refuses unsupported files, oversize uploads and unknown courses without storing anything", () => {
 		const count = () => stores.materialStore.listMaterials().length;
 		const before = count();
-		assert.equal((service.uploadMaterial(course.id, "old.ppt", Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 1, 2])) as { code: string }).code, "unsupported");
-		assert.equal((service.uploadMaterial("course_missing", "a.md", Buffer.from("x")) as { code: string }).code, "course_not_found");
-		assert.equal((service.uploadMaterial(course.id, "huge.md", new Uint8Array(25 * 1024 * 1024 + 1)) as { status: number }).status, 413);
+		assert.equal((service.uploadMaterial({ courseId: course.id }, "old.ppt", Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 1, 2])) as { code: string }).code, "unsupported");
+		assert.equal((service.uploadMaterial({ courseId: "course_missing" }, "a.md", Buffer.from("x")) as { code: string }).code, "course_not_found");
+		assert.equal((service.uploadMaterial({ courseId: course.id }, "huge.md", new Uint8Array(25 * 1024 * 1024 + 1)) as { status: number }).status, 413);
 		assert.equal(count(), before);
 	});
 
@@ -302,7 +303,7 @@ describe("the materials service", () => {
 
 	it("deleting a course deletes its materials", async () => {
 		const other = stores.courseStore.createCourse("Short-lived", "");
-		const outcome = service.uploadMaterial(other.id, "a.txt", Buffer.from("Notes"));
+		const outcome = service.uploadMaterial({ courseId: other.id }, "a.txt", Buffer.from("Notes"));
 		assert.ok(outcome.ok);
 		await settled(outcome.material.id);
 		const res = await coursesRoute.DELETE(new Request("http://test/api", { method: "DELETE" }), { params: Promise.resolve({ id: other.id }) });
