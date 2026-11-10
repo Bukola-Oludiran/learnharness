@@ -109,6 +109,8 @@ export const KEYPAD: Record<KeypadTab, { columns: number; keys: Key[] }> = {
 			k("Aᵀ", "^T", "transpose", "^{T}"), k("A⁻¹", "^-1", "inverse", "^{-1}"), fn("det", "det"), fn("trace", "trace"),
 			fn("span", "span"), k("u"), k("v"), k("w"),
 			k("A"), k("B"), k("="), k(","),
+			// Phase 5d-2: the visual tools.
+			fn("transform", "transform"), fn("eigen", "eigen"), fn("solve", "solve", 2), k("b"),
 		],
 	},
 	letters: {

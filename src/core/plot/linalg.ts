@@ -10,6 +10,11 @@
  *   A v, A B, A^2, A^-1, A^T   matrix products, powers, inverse, transpose
  *   norm(v), |v|               length
  *   det(A), trace(A), transpose(A), inv(A)
+ *   solve(A, b)                the solution of A x = b
+ *
+ * Also here, for the lines that draw rather than compute (phase 5d-2):
+ * solveSystem (where straight lines and planes meet) and eigen (real
+ * eigenvalues and eigenvectors of 2 × 2 and 3 × 3 matrices).
  *
  * A combination that makes no sense (u + A, a 2 × 2 matrix times a vector
  * with three entries) throws an ExprError worded for the learner. Pure.
@@ -124,6 +129,124 @@ export function spanBasis(vectors: readonly Vector[]): Vector[] {
 	return basis;
 }
 
+export type Solution =
+	| { kind: "point"; at: Vector }
+	/** Every `point + s·direction + …` solves it. */
+	| { kind: "many"; point: Vector; directions: Vector[] }
+	| { kind: "none" };
+
+/** Row-reduce [A | b] with partial pivoting. `tolerance` is relative to the largest entry. */
+function reduce(rows: Matrix, columns: number, tolerance: number): { rows: Matrix; pivots: number[] } {
+	const a = rows.map((row) => [...row]);
+	const scale = Math.max(...a.flatMap((row) => row.slice(0, columns)).map(Math.abs), 0);
+	const pivots: number[] = [];
+	let at = 0;
+	for (let column = 0; column < columns && at < a.length; column++) {
+		let pivot = at;
+		for (let row = at + 1; row < a.length; row++) if (Math.abs(a[row]![column]!) > Math.abs(a[pivot]![column]!)) pivot = row;
+		const value = a[pivot]![column]!;
+		if (!(Math.abs(value) > tolerance * scale)) continue;
+		[a[pivot], a[at]] = [a[at]!, a[pivot]!];
+		a[at] = a[at]!.map((x) => x / value);
+		for (let row = 0; row < a.length; row++) {
+			const factor = a[row]![column]!;
+			if (row === at || factor === 0) continue;
+			a[row] = a[row]!.map((x, j) => x - factor * a[at]![j]!);
+		}
+		pivots.push(column);
+		at++;
+	}
+	return { rows: a, pivots };
+}
+
+/** The vectors a matrix sends to zero, one for each free column. */
+export function nullSpace(m: Matrix, tolerance = 1e-10): Vector[] {
+	const columns = m[0]!.length;
+	const { rows, pivots } = reduce(m, columns, tolerance);
+	const free = Array.from({ length: columns }, (_, j) => j).filter((j) => !pivots.includes(j));
+	return free.map((column) => {
+		const vector: number[] = Array.from({ length: columns }, (_, j) => (j === column ? 1 : 0));
+		pivots.forEach((pivot, row) => {
+			vector[pivot] = 0 - rows[row]![column]!; // never -0
+		});
+		return vector;
+	});
+}
+
+/** Solve A x = b for any shape of A: one point, a line or plane of them, or none. */
+export function solveSystem(m: Matrix, b: Vector): Solution {
+	const columns = m[0]!.length;
+	const augmented = m.map((row, i) => [...row, b[i]!]);
+	if (augmented.flat().some((x) => !Number.isFinite(x))) return { kind: "none" };
+	const { rows, pivots } = reduce(augmented, columns, 1e-10);
+	const scale = Math.max(...b.map(Math.abs), 1);
+	// A row that reads 0 = c, with c not zero, cannot be satisfied.
+	if (rows.slice(pivots.length).some((row) => Math.abs(row[columns]!) > 1e-9 * scale)) return { kind: "none" };
+	const point = Array.from({ length: columns }, () => 0);
+	pivots.forEach((pivot, row) => {
+		point[pivot] = rows[row]![columns]! + 0;
+	});
+	if (pivots.length === columns) return { kind: "point", at: point };
+	return { kind: "many", point, directions: nullSpace(m) };
+}
+
+export interface Eigenpair {
+	value: number;
+	/** A basis of the eigenvectors for this value, each scaled so its largest entry is 1. */
+	vectors: Vector[];
+}
+
+/** The real roots of x³ + a x² + b x + c, with repeats merged. */
+function cubicRoots(a: number, b: number, c: number): number[] {
+	// Substituting x = t − a/3 leaves t³ + p t + q.
+	const p = b - (a * a) / 3;
+	const q = (2 * a * a * a) / 27 - (a * b) / 3 + c;
+	const shift = -a / 3;
+	const discriminant = (q * q) / 4 + (p * p * p) / 27;
+	const size = Math.max(Math.abs(p) ** 1.5, Math.abs(q), 1e-300);
+	if (discriminant > 1e-12 * size * size) {
+		const root = Math.sqrt(discriminant);
+		return [Math.cbrt(-q / 2 + root) + Math.cbrt(-q / 2 - root) + shift];
+	}
+	if (Math.abs(p) < 1e-14 * Math.max(1, a * a)) return [shift];
+	// Three real roots, by the trigonometric form.
+	const radius = 2 * Math.sqrt(-p / 3);
+	const angle = Math.acos(Math.max(-1, Math.min(1, (3 * q) / (p * radius)))) / 3;
+	return [0, 1, 2].map((k) => radius * Math.cos(angle - (2 * Math.PI * k) / 3) + shift);
+}
+
+/** The real eigenvalues of a 2 × 2 or 3 × 3 matrix, largest first, each with its eigenvectors. */
+export function eigen(m: Matrix): Eigenpair[] {
+	const n = m.length;
+	if (!isSquare(m) || (n !== 2 && n !== 3)) throw new ExprError("eigen works on 2 × 2 and 3 × 3 matrices.");
+	if (m.flat().some((x) => !Number.isFinite(x))) return [];
+	const trace = m.reduce((sum, row, i) => sum + row[i]!, 0);
+	let roots: number[];
+	if (n === 2) {
+		const determinant = m[0]![0]! * m[1]![1]! - m[0]![1]! * m[1]![0]!;
+		const discriminant = trace * trace - 4 * determinant;
+		const scale = Math.max(trace * trace, Math.abs(determinant), 1e-300);
+		if (discriminant < -1e-12 * scale) return [];
+		const root = Math.sqrt(Math.max(0, discriminant));
+		roots = [(trace + root) / 2, (trace - root) / 2];
+	} else {
+		const minors = m[0]![0]! * m[1]![1]! - m[0]![1]! * m[1]![0]! + m[0]![0]! * m[2]![2]! - m[0]![2]! * m[2]![0]! + m[1]![1]! * m[2]![2]! - m[1]![2]! * m[2]![1]!;
+		roots = cubicRoots(-trace, minors, -eliminate(m).det);
+	}
+	const scale = Math.max(...m.flat().map(Math.abs), 1e-300);
+	const distinct: number[] = [];
+	for (const root of roots.sort((x, y) => y - x)) if (!distinct.some((seen) => Math.abs(seen - root) <= 1e-6 * scale)) distinct.push(root);
+	const tidy = (x: number) => (Math.abs(x - Math.round(x)) < 1e-9 * Math.max(1, Math.abs(x)) ? Math.round(x) : x) + 0; // + 0: never -0
+	return distinct.flatMap((value) => {
+		// A repeated root is only known to about half the digits, so the test for "sent to zero" is loose.
+		const vectors = nullSpace(m.map((row, i) => row.map((x, j) => (i === j ? x - value : x))), 1e-6).map((vector) => {
+			const largest = vector.reduce((best, x) => (Math.abs(x) > Math.abs(best) ? x : best), 0);
+			return vector.map((x) => tidy(x / largest));
+		});
+		return vectors.length > 0 ? [{ value: tidy(value), vectors }] : [];
+	});
+}
+
 function sameShape(a: Value, b: Value): boolean {
 	if (typeof a === "number" || typeof b === "number") return typeof a === typeof b;
 	if (isMatrix(a) !== isMatrix(b) || a.length !== b.length) return false;
@@ -199,8 +322,17 @@ function linearCall(fn: string, args: Value[]): Value {
 			return isVector(args[0]!) ? args[0]! : transpose(matrixOf(args[0]!, "transpose"));
 		case "inv":
 			return typeof args[0] === "number" ? 1 / args[0] : inverse(matrixOf(args[0]!, "inv"));
+		case "solve": {
+			const m = matrixOf(args[0]!, "solve");
+			const b = vectorOf(args[1]!, "solve");
+			if (m.length !== b.length) throw new ExprError(`solve(A, b) needs b to have one entry for each row of A: ${m.length}, not ${b.length}.`);
+			const solution = solveSystem(m, b);
+			if (solution.kind === "none") throw new ExprError("This system has no solution.");
+			if (solution.kind === "many") throw new ExprError("This system has infinitely many solutions.");
+			return solution.at;
+		}
 		default:
-			throw new ExprError("span(…) goes on a line of its own.");
+			throw new ExprError(`${fn}(…) goes on a line of its own.`);
 	}
 }
 
