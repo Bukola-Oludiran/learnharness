@@ -3,8 +3,9 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { KeyboardIcon, PlusIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { applyKey, Keypad, type Key } from "./keypad";
-import { formatValue, DEFAULT_SLIDER, MAX_LINE_CHARS, MAX_PLOT_LINES, nextLineId, PLOT_COLORS, resolvePlot, withMode, withSliderValue, type PlotDoc, type PlotLine, type PlotMode, type ResolvedLine } from "@/src/core";
+import { Keypad, type Key } from "./keypad";
+import { MATH_LINE_CSS, MathLine, type LineHandle } from "./math-line";
+import { formatValue, functionHeader, withoutTypeset, DEFAULT_SLIDER, MAX_LINE_CHARS, MAX_PLOT_LINES, nextLineId, PLOT_COLORS, resolvePlot, withMode, withSliderValue, type PlotDoc, type PlotLine, type PlotMode, type ResolvedLine } from "@/src/core";
 import { PlotCanvas, type PlotCanvasHandle } from "./plot-canvas";
 
 /**
@@ -105,6 +106,7 @@ export function ExpressionRow({
 	meaning,
 	index,
 	onText,
+	functions,
 	onToggle,
 	onRemove,
 	onEnter,
@@ -123,14 +125,17 @@ export function ExpressionRow({
 	line: PlotLine;
 	meaning: ResolvedLine;
 	index: number;
-	onText: (text: string) => void;
+	/** An edit to the line: its text, and (from the maths editor) how it was typeset. */
+	onText: (text: string, typeset?: { latex?: string; problem?: string }) => void;
+	/** The graph's function names, so f(x) typesets as a call. */
+	functions?: ReadonlySet<string>;
 	onToggle: () => void;
 	onRemove: () => void;
 	onEnter: () => void;
 	onSlider: (value: number) => void;
 	onRange: (min: number, max: number) => void;
 	onAddSlider: (name: string) => void;
-	inputRef?: (element: HTMLInputElement | null) => void;
+	inputRef?: (handle: LineHandle | null) => void;
 	placeholder?: string;
 }) {
 	const color = PLOT_COLORS[(line.color ?? index) % PLOT_COLORS.length]!;
@@ -149,25 +154,16 @@ export function ExpressionRow({
 					className="size-4 shrink-0 rounded-full border-2"
 					style={{ borderColor: color, backgroundColor: line.hidden || meaning.kind === "definition" ? "transparent" : color }}
 				/>
-				<input
-					ref={inputRef}
-					data-testid="plot-line-input"
-					aria-label={`Expression ${index + 1}`}
-					value={line.text}
-					maxLength={MAX_LINE_CHARS}
-					spellCheck={false}
-					autoCapitalize="off"
-					autoCorrect="off"
-					placeholder={placeholder ?? ""}
-					onChange={(event) => onText(event.target.value)}
+				<MathLine
+					text={line.text}
+					latex={line.latex}
+					functions={functions}
+					index={index}
+					placeholder={placeholder}
+					onEdit={(edit) => onText(edit.text, { latex: edit.latex, problem: edit.problem })}
 					onFocus={onFocus}
-					onKeyDown={(event) => {
-						if (event.key === "Enter") {
-							event.preventDefault();
-							onEnter();
-						}
-					}}
-					className="min-w-0 flex-1 bg-transparent font-mono text-sm outline-none placeholder:text-muted-foreground/40"
+					onEnter={onEnter}
+					handleRef={inputRef}
 				/>
 				<button type="button" data-testid="plot-line-remove" aria-label="Remove this expression" onClick={onRemove} className="shrink-0 text-muted-foreground/60 transition-colors hover:text-foreground">
 					<XIcon className="size-3.5" />
@@ -233,7 +229,8 @@ export function ExpressionRow({
 
 export function Grapher({ doc, onChange, canvasRef, className }: { doc: PlotDoc; onChange: (doc: PlotDoc) => void; canvasRef?: React.Ref<PlotCanvasHandle>; className?: string }) {
 	const resolved = useMemo(() => resolvePlot(doc), [doc]);
-	const inputs = useRef(new Map<string, HTMLInputElement>());
+	const inputs = useRef(new Map<string, LineHandle>());
+	const functions = useMemo(() => new Set(doc.lines.flatMap((line) => functionHeader(line.text)?.name ?? [])), [doc.lines]);
 	const focused = useRef<string | null>(null);
 	const [keypad, setKeypad] = useState(false);
 	// Read after mount: local storage does not exist during server render.
@@ -269,24 +266,14 @@ export function Grapher({ doc, onChange, canvasRef, className }: { doc: PlotDoc;
 	const pressKey = (key: Key) => {
 		const id = focused.current && doc.lines.some((line) => line.id === focused.current) ? focused.current : doc.lines.at(-1)?.id;
 		const index = doc.lines.findIndex((line) => line.id === id);
-		const input = id ? inputs.current.get(id) : undefined;
-		if (!id || index < 0) return;
-		const line = doc.lines[index]!;
-		const result = applyKey(line.text, input?.selectionStart ?? line.text.length, input?.selectionEnd ?? line.text.length, key);
-		if ("enter" in result) {
-			addAfter(index);
-			return;
-		}
-		if (result.text !== line.text) patch(id, { text: result.text });
-		requestAnimationFrame(() => {
-			const target = inputs.current.get(id);
-			target?.focus();
-			target?.setSelectionRange(result.caret, result.caret);
-		});
+		const handle = id ? inputs.current.get(id) : undefined;
+		if (!id || index < 0 || !handle) return;
+		if (handle.press(key)) addAfter(index);
 	};
 
 	return (
 		<div data-testid="grapher" className={cn("flex min-h-0", className)}>
+			<style>{MATH_LINE_CSS}</style>
 			<div className="flex w-80 shrink-0 flex-col border-r border-border">
 				<div className="flex">
 					<ModeSwitch mode={doc.mode} onMode={(mode) => onChange(withMode(doc, mode))} />
@@ -305,13 +292,21 @@ export function Grapher({ doc, onChange, canvasRef, className }: { doc: PlotDoc;
 							line={line}
 							meaning={resolved.lines[index]!}
 							index={index}
-							inputRef={(element) => {
-								if (element) inputs.current.set(line.id, element);
+							inputRef={(handle) => {
+								if (handle) inputs.current.set(line.id, handle);
 								else inputs.current.delete(line.id);
 							}}
-							onText={(text) => patch(line.id, { text })}
+							functions={functions}
+							onText={(text, typeset) =>
+								onChange({
+									...doc,
+									lines: doc.lines.map((l) =>
+										l.id === line.id ? { ...withoutTypeset(l), text, ...(typeset?.latex !== undefined ? { latex: typeset.latex } : {}), ...(typeset?.problem ? { problem: typeset.problem } : {}) } : l,
+									),
+								})
+							}
 							onToggle={() => patch(line.id, { hidden: !line.hidden })}
-							onRemove={() => onChange({ ...doc, lines: doc.lines.length > 1 ? doc.lines.filter((l) => l.id !== line.id) : [{ ...line, text: "" }] })}
+							onRemove={() => onChange({ ...doc, lines: doc.lines.length > 1 ? doc.lines.filter((l) => l.id !== line.id) : [{ ...withoutTypeset(line), text: "" }] })}
 							onEnter={() => addAfter(index)}
 							onSlider={(value) => onChange(withSliderValue(doc, line.id, value))}
 							onRange={(min, max) => {

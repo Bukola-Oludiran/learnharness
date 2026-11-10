@@ -13,7 +13,7 @@ import { cleanPlotDoc, DEFINITION_START, MAX_LINE_CHARS, resolvePlot, type PlotD
  * The record keeps the graph document (`details` → the tool part's output
  * → GraphCard). The tutor's result is text: what was shown, and any line
  * that could not be read. Description approved by the owner, 2026-11-10
- * (the 3D paragraph the same day, phase 5c).
+ * (the 3D paragraph the same day, phase 5c; the calculus sentence, phase 5c3).
  */
 
 export const MAX_GRAPH_EXPRESSIONS = 20;
@@ -105,7 +105,9 @@ export function createGraphTool(): AgentTool<typeof graphInput> {
 			"Put an interactive graph into the lesson. The learner can pan, zoom, drag its sliders and open it in their own grapher. Instant.",
 			"Give each expression as plain text: a function of x (y = sin(x), or just x^2 - 1); a function of y (x = y^2); an implicit equation (x^2 + y^2 = 9); " +
 				"a parametric curve ((cos(t), sin(2t)), t from 0 to 2π unless you set a range); a polar curve (r = 1 + cos(theta)); points ((1, 2), (3, 4)); " +
-				"or a slider (a = 2), which sets a letter the other expressions can use and the learner can drag. Write multiplication as 2x or 2*x and powers with ^. Angles are in radians unless you set angles to degrees.",
+				"or a slider (a = 2), which sets a letter the other expressions can use and the learner can drag. Write multiplication as 2x or 2*x and powers with ^. Angles are in radians unless you set angles to degrees. " +
+				"You can also write int(expr, var, from, to) for a definite integral, deriv(expr, var) for a derivative, sum(expr, var, from, to) and prod(expr, var, from, to), " +
+				"and define a function with f(x) = … to use as f(2), f(x - 1) or f'(x).",
 			"Set dimension to 3 for a 3D graph the learner can rotate. There, give a surface as z = x^2 + y^2 (or just an expression in x and y); " +
 				"any equation in x, y and z as an implicit surface (x^2 + y^2 + z^2 = 9, or a plane 2x + y - z = 4); a space curve as (cos(t), sin(t), t); " +
 				"a parametric surface as (u*cos(v), u*sin(v), v), with u and v from 0 to 2π unless you set ranges; and points as (1, 2, 3). " +

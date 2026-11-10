@@ -4,17 +4,20 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * The grapher's scientific keypad (fork, phase 5c2 — see FORK.md). Every
- * key only edits text: it inserts at the cursor of the focused expression
- * line (or moves the cursor, deletes, or starts a new line), and the
- * grapher's one parser reads the result. A key and typing the same
- * characters can therefore never disagree.
+ * The grapher's scientific keypad (fork, phases 5c2–5c3 — see FORK.md).
+ * A key has no logic of its own: it inserts at the cursor of the focused
+ * expression line (or moves the cursor, deletes, or starts a new line). In
+ * the maths editor it inserts a structure; in a plain text box, text.
+ * Either way the grapher's one parser reads the result, so a key and
+ * typing the same thing can never disagree.
  */
 
 export interface Key {
 	label: string;
-	/** Text put at the cursor. */
+	/** Text put at the cursor of a plain text box. */
 	insert?: string;
+	/** What the maths editor inserts instead, when it differs: LaTeX, with #? for a box to fill. */
+	latex?: string;
 	/** How far back from the end of the inserted text the cursor lands (inside the brackets of `sin()`). */
 	back?: number;
 	action?: "left" | "right" | "backspace" | "enter";
@@ -24,19 +27,31 @@ export interface Key {
 	span?: number;
 }
 
-const fn = (label: string, name: string, args = 1): Key => ({ label, insert: `${name}(${args === 2 ? ", " : ""})`, back: args === 2 ? 3 : 1, name: label });
-const k = (label: string, insert = label, name?: string): Key => ({ label, insert, ...(name ? { name } : {}) });
+// Each key carries two spellings: `insert` for a plain text box, `latex` for
+// the maths editor, where #? is a box to fill and #@ takes what is selected
+// (or, with nothing selected, what stands before the cursor — as "/" does).
+const command = (name: string) => (["sin", "cos", "tan", "sec", "csc", "cot", "sinh", "cosh", "tanh", "ln", "log", "exp", "min", "max", "gcd"].includes(name) ? `\\${name}` : `\\operatorname{${name}}`);
+const LATEX_NAME: Record<string, string> = { asin: "\\arcsin", acos: "\\arccos", atan: "\\arctan" };
+const fn = (label: string, name: string, args = 1): Key => ({
+	label,
+	insert: `${name}(${args === 2 ? ", " : ""})`,
+	back: args === 2 ? 3 : 1,
+	latex: `${LATEX_NAME[name] ?? command(name)}\\left(${args === 2 ? "#?,#?" : "#?"}\\right)`,
+	name: label,
+});
+const k = (label: string, insert = label, name?: string, latex?: string): Key => ({ label, insert, ...(name ? { name } : {}), ...(latex ? { latex } : {}) });
+const GREEK_COMMANDS: Record<string, string> = { α: "alpha", β: "beta", γ: "gamma", δ: "delta", λ: "lambda", μ: "mu", σ: "sigma", φ: "phi", ω: "omega" };
 
-export type KeypadTab = "main" | "functions" | "letters";
+export type KeypadTab = "main" | "functions" | "calculus" | "letters";
 
 export const KEYPAD: Record<KeypadTab, { columns: number; keys: Key[] }> = {
 	main: {
 		columns: 6,
 		keys: [
 			k("x"), k("y"), k("z"), k("t"), k("("), k(")"),
-			k("7"), k("8"), k("9"), k("÷", "/", "divide"), k("^", "^", "power"), k("x²", "^2", "squared"),
-			k("4"), k("5"), k("6"), k("×", "*", "times"), { label: "√", insert: "sqrt()", back: 1, name: "square root" }, { label: "|a|", insert: "||", back: 1, name: "absolute value" },
-			k("1"), k("2"), k("3"), k("−", "-", "minus"), k("π", "pi", "pi"), k("e"),
+			k("7"), k("8"), k("9"), k("÷", "/", "divide", "\\frac{#@}{#?}"), k("^", "^", "power", "^{#?}"), k("x²", "^2", "squared", "^2"),
+			k("4"), k("5"), k("6"), k("×", "*", "times", "\\cdot "), { label: "√", insert: "sqrt()", back: 1, latex: "\\sqrt{#?}", name: "square root" }, { label: "|a|", insert: "||", back: 1, latex: "\\left|#?\\right|", name: "absolute value" },
+			k("1"), k("2"), k("3"), k("−", "-", "minus"), k("π", "pi", "pi", "\\pi "), k("e"),
 			k("0"), k("."), k(","), k("+", "+", "plus"), k("="), k("!", "!", "factorial"),
 		],
 	},
@@ -46,17 +61,34 @@ export const KEYPAD: Record<KeypadTab, { columns: number; keys: Key[] }> = {
 			fn("sin", "sin"), fn("cos", "cos"), fn("tan", "tan"), fn("exp", "exp"),
 			fn("sin⁻¹", "asin"), fn("cos⁻¹", "acos"), fn("tan⁻¹", "atan"), fn("ln", "ln"),
 			fn("sec", "sec"), fn("csc", "csc"), fn("cot", "cot"), fn("log", "log"),
-			fn("sec⁻¹", "asec"), fn("csc⁻¹", "acsc"), fn("cot⁻¹", "acot"), { ...fn("logₐ", "log", 2), name: "log to a base: log(x, base)" },
-			fn("sinh", "sinh"), fn("cosh", "cosh"), fn("tanh", "tanh"), { ...fn("ⁿ√", "root", 2), name: "nth root: root(x, n)" },
+			fn("sec⁻¹", "asec"), fn("csc⁻¹", "acsc"), fn("cot⁻¹", "acot"), { ...fn("logₐ", "log", 2), latex: "\\log_{#?}\\left(#?\\right)", name: "log to a base" },
+			fn("sinh", "sinh"), fn("cosh", "cosh"), fn("tanh", "tanh"), { ...fn("ⁿ√", "root", 2), latex: "\\sqrt[#?]{#?}", name: "nth root" },
 			fn("sinh⁻¹", "asinh"), fn("cosh⁻¹", "acosh"), fn("tanh⁻¹", "atanh"), k("n!", "!", "factorial"),
-			fn("nCr", "nCr", 2), fn("nPr", "nPr", 2), fn("mod", "mod", 2), fn("abs", "abs"),
+			fn("nCr", "nCr", 2), fn("nPr", "nPr", 2), fn("mod", "mod", 2), { ...fn("abs", "abs"), latex: "\\left|#?\\right|" },
 			fn("gcd", "gcd", 2), fn("lcm", "lcm", 2), fn("min", "min", 2), fn("max", "max", 2),
 			fn("floor", "floor"), fn("ceil", "ceil"), fn("round", "round"), fn("sign", "sign"),
 		],
 	},
+	// Phase 5c3: structures. In a text box each types its function form.
+	calculus: {
+		columns: 4,
+		keys: [
+			{ label: "∫", insert: "int(, x, , )", back: 8, latex: "\\int_{#?}^{#?}#?\\,\\mathrm{d}x", name: "definite integral" },
+			{ label: "d/dx", insert: "deriv(, x)", back: 4, latex: "\\frac{\\mathrm{d}}{\\mathrm{d}x}\\left(#?\\right)", name: "derivative" },
+			{ label: "Σ", insert: "sum(, n, , )", back: 8, latex: "\\sum_{n=#?}^{#?}#?", name: "sum" },
+			{ label: "Π", insert: "prod(, n, , )", back: 8, latex: "\\prod_{n=#?}^{#?}#?", name: "product" },
+			{ label: "a/b", insert: "/", latex: "\\frac{#@}{#?}", name: "fraction" },
+			{ label: "f(x)=", insert: "f(x) = ", latex: "f\\left(x\\right)=", name: "define a function" },
+			{ label: "f(x)", insert: "f()", back: 1, latex: "f\\left(#?\\right)", name: "call f" },
+			{ label: "f′", insert: "f'()", back: 1, latex: "f'\\left(#?\\right)", name: "derivative of f" },
+			k("′", "'", "prime"), k("n"), k("k"), k("i"),
+		],
+	},
 	letters: {
 		columns: 7,
-		keys: [..."abcdefghijklmnopqrstuvwxyz"].map((letter) => k(letter)).concat([k("θ", "theta", "theta"), ...[..."αβγδλμσφω"].map((letter) => k(letter))]),
+		keys: [..."abcdefghijklmnopqrstuvwxyz"]
+			.map((letter) => k(letter))
+			.concat([k("θ", "theta", "theta", "\\theta "), ...[..."αβγδλμσφω"].map((letter) => k(letter, letter, undefined, `\\${GREEK_COMMANDS[letter]} `))]),
 	},
 };
 
@@ -97,7 +129,7 @@ export function applyKey(text: string, selectionStart: number, selectionEnd: num
 	}
 }
 
-const TAB_LABEL: Record<KeypadTab, string> = { main: "123", functions: "f(x)", letters: "abc" };
+const TAB_LABEL: Record<KeypadTab, string> = { main: "123", functions: "f(x)", calculus: "∫ Σ", letters: "abc" };
 const KEY = "flex h-8 items-center justify-center rounded-sm border border-border/70 bg-card text-xs transition-colors hover:bg-accent active:bg-accent/70";
 
 export function Keypad({ onKey, initialTab = "main" }: { onKey: (key: Key) => void; initialTab?: KeypadTab }) {

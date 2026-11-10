@@ -214,7 +214,7 @@ describe("the scientific keypad", () => {
 
 	it("a key inserts at the cursor, lands inside brackets, and wraps a selection", async () => {
 		const { applyKey, KEYPAD } = await import("../components/plot/keypad.tsx");
-		const key = (tab: "main" | "functions" | "letters", label: string) => KEYPAD[tab].keys.find((k) => k.label === label)!;
+		const key = (tab: "main" | "functions" | "calculus" | "letters", label: string) => KEYPAD[tab].keys.find((k) => k.label === label)!;
 		assert.deepEqual(applyKey("y = ", 4, 4, key("functions", "sin")), { text: "y = sin()", caret: 8 });
 		assert.deepEqual(applyKey("y = x + 1", 4, 9, key("functions", "sin")), { text: "y = sin(x + 1)", caret: 14 });
 		assert.deepEqual(applyKey("x", 1, 1, key("main", "x²")), { text: "x^2", caret: 3 });
@@ -264,7 +264,10 @@ describe("the scientific keypad", () => {
 	it("renders three tabs with the action row, and keys that never take the focus", async () => {
 		const { Keypad } = await import("../components/plot/keypad.tsx");
 		const main = renderToStaticMarkup(<Keypad onKey={noop} />);
-		assert.match(main, /data-testid="keypad-tab-main"[^>]*aria-selected="true"[\s\S]*data-testid="keypad-tab-functions"[\s\S]*data-testid="keypad-tab-letters"/);
+		assert.match(main, /data-testid="keypad-tab-main"[^>]*aria-selected="true"[\s\S]*data-testid="keypad-tab-functions"[\s\S]*data-testid="keypad-tab-calculus"[\s\S]*data-testid="keypad-tab-letters"/);
+		const calculus = renderToStaticMarkup(<Keypad onKey={noop} initialTab="calculus" />);
+		assert.equal(calculus.match(/data-testid="keypad-key"/g)!.length, 12 + 4);
+		assert.match(calculus, /aria-label="definite integral"[\s\S]*aria-label="derivative"[\s\S]*aria-label="sum"[\s\S]*aria-label="product"[\s\S]*aria-label="define a function"/);
 		assert.equal(main.match(/data-testid="keypad-key"/g)!.length, 30 + 4);
 		assert.match(main, /data-key="sqrt\(\)" aria-label="square root"/);
 		assert.match(main, /data-key="enter" aria-label="new line"[^>]*tabindex="-1"[^>]*style="grid-column:span 3"/);
@@ -295,5 +298,68 @@ describe("the scientific keypad", () => {
 
 	it("the tool takes degrees, as approved", () => {
 		assert.match(createGraphTool().description, /Angles are in radians unless you set angles to degrees\./);
+	});
+});
+
+// ── Phase 5c3: the maths editor ─────────────────────────────────────────────
+describe("the maths editor's keys and lines", () => {
+	const noop = () => {};
+
+	it("every key's structure reads back as something the grapher can parse", async () => {
+		const { KEYPAD } = await import("../components/plot/keypad.tsx");
+		const { latexToText, parseExpr } = await import("../src/core/plot/index.ts");
+		for (const [tab, layout] of Object.entries(KEYPAD)) {
+			for (const key of layout.keys) {
+				// As the editor would hold it once every box is filled, standing after a 3.
+				const filled = `3${(key.latex ?? key.insert ?? "").replace(/#@/g, "3").replace(/#\?/g, "2")}`.replace(/^3\\frac\{3\}/, "\\frac{3}");
+				let text = "";
+				assert.doesNotThrow(() => { text = latexToText(filled); }, `${tab} ${key.label}: ${filled}`);
+				if (key.label === "f(x)=" || ["(", ")", ",", "=", "^", "÷", "×", "+", "−", "."].includes(key.label)) continue; // not whole expressions alone
+				assert.doesNotThrow(() => parseExpr(text.replace(/^3\s*'$/, "3"), tab === "calculus" ? new Set(["f"]) : undefined), `${tab} ${key.label}: ${filled} → ${text}`);
+			}
+		}
+	});
+
+	it("the calculus keys also type their function forms into a plain text box", async () => {
+		const { applyKey, KEYPAD } = await import("../components/plot/keypad.tsx");
+		const key = (label: string) => KEYPAD.calculus.keys.find((k) => k.label === label)!;
+		assert.deepEqual(applyKey("", 0, 0, key("∫")), { text: "int(, x, , )", caret: 4 });
+		assert.deepEqual(applyKey("", 0, 0, key("Σ")), { text: "sum(, n, , )", caret: 4 });
+		assert.deepEqual(applyKey("", 0, 0, key("Π")), { text: "prod(, n, , )", caret: 5 });
+		assert.deepEqual(applyKey("", 0, 0, key("d/dx")), { text: "deriv(, x)", caret: 6 });
+		assert.deepEqual(applyKey("", 0, 0, key("f′")), { text: "f'()", caret: 3 });
+	});
+
+	it("a line keeps how it was typeset, until its text changes from outside", async () => {
+		const { cleanPlotDoc, withSliderValue, withoutTypeset } = await import("../src/core/plot/index.ts");
+		const d = doc(["a = 2", "y = a x"]);
+		d.lines[0]!.latex = "a=2";
+		d.lines[1]!.latex = "y=ax";
+		const moved = withSliderValue(d, "l1", 3);
+		assert.deepEqual(moved.lines[0], { id: "l1", text: "a = 3", color: 0 }, "the slider's line is re-typeset from its new text");
+		assert.equal(moved.lines[1]!.latex, "y=ax");
+		assert.deepEqual(withoutTypeset({ id: "l", text: "x", latex: "x", problem: "p" }), { id: "l", text: "x" });
+		const cleaned = cleanPlotDoc({ lines: [{ text: "y = x", latex: "y=x", problem: "stale" }, { text: "x", latex: 7 }] })!;
+		assert.deepEqual(cleaned.lines.map((line) => [line.latex, line.problem]), [["y=x", undefined], [undefined, undefined]]);
+	});
+
+	it("what the editor could not read is the line's error, and server rendering falls back to a text box", () => {
+		const d = doc(["y = x"]);
+		d.lines[0]!.text = "";
+		d.lines[0]!.latex = "\\frac{1}{\\placeholder{}}";
+		d.lines[0]!.problem = "Fill in the empty box.";
+		assert.deepEqual(resolvePlot(d).lines[0], { id: "l1", kind: "error", error: "Fill in the empty box." });
+		const html = renderToStaticMarkup(
+			<ExpressionRow line={d.lines[0]!} meaning={resolvePlot(d).lines[0]!} index={0} onText={noop} onToggle={noop} onRemove={noop} onEnter={noop} onSlider={noop} onRange={noop} onAddSlider={noop} />,
+		);
+		assert.match(html, /data-testid="plot-line-input"[\s\S]*data-testid="plot-line-error"[^>]*>Fill in the empty box\./);
+		assert.doesNotMatch(html, /math-field/, "the editor mounts in the browser only");
+	});
+
+	it("the tool's description covers calculus and functions as approved", () => {
+		assert.match(createGraphTool().description, /You can also write int\(expr, var, from, to\) for a definite integral, deriv\(expr, var\) for a derivative, sum\(expr, var, from, to\) and prod\(expr, var, from, to\), and define a function with f\(x\) = … to use as f\(2\), f\(x - 1\) or f'\(x\)\./);
+		const built = graphDocOf({ expressions: ["f(x) = x^2", "y = f'(x)", "int(f(x), x, 0, 3)", "y = sum(sin(n x)/n, n, 1, 5)"] });
+		assert.equal(graphResultText(built), "Graph shown to the learner: 4 expressions.");
+		assert.deepEqual(resolvePlot(built).lines.map((line) => line.kind), ["explicit-y", "explicit-y", "value", "explicit-y"]);
 	});
 });

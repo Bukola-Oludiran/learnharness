@@ -68,7 +68,7 @@ export function drawPlot(ctx: CanvasRenderingContext2D, width: number, height: n
 	// Curves.
 	const resolved = resolvePlot(doc);
 	const [tMin, tMax] = parameterRanges(doc).t;
-	const samples = Math.max(200, Math.min(2000, Math.round(width)));
+	const fullSamples = Math.max(200, Math.min(2000, Math.round(width)));
 	const stroke = (lines: Polyline[], flip = false) => {
 		ctx.beginPath();
 		for (const line of lines) {
@@ -89,6 +89,8 @@ export function drawPlot(ctx: CanvasRenderingContext2D, width: number, height: n
 		const source = doc.lines[index]!;
 		if (source.hidden) continue;
 		const color = PLOT_COLORS[(source.color ?? index) % PLOT_COLORS.length]!;
+		// A curve whose every point is an integral is sampled more coarsely, so panning stays smooth.
+		const samples = resolved.costly.has(line.id) ? Math.min(160, fullSamples) : fullSamples;
 		ctx.strokeStyle = color;
 		ctx.fillStyle = color;
 		switch (line.kind) {

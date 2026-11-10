@@ -19,7 +19,7 @@
  * two modes: `x^2 + y^2 = 4` is a circle in 2D and a cylinder in 3D.
  */
 
-import { compile as compileExpr, ExprError, parseTokens, splitEquation, tokenize, variablesOf, type Compiled, type Expr, type Scope } from "./expr.ts";
+import { compile as compileExpr, ExprError, parseTokens, splitEquation, tokenize, variablesOf, type Compiled, type Expr, type Scope, type UserFunction } from "./expr.ts";
 
 export interface PlotView {
 	xMin: number;
@@ -37,6 +37,12 @@ export interface PlotLine {
 	/** A definition's slider range. */
 	min?: number;
 	max?: number;
+	/** The line as typeset in the maths editor (phase 5c3). `text` stays the
+	 *  truth — what is parsed, saved and sent to the tutor; this only keeps
+	 *  the editor showing exactly what was typed. Absent → derived from text. */
+	latex?: string;
+	/** Why the editor's contents could not be turned into `text`. */
+	problem?: string;
 }
 
 /** The box a 3D graph shows. */
@@ -91,6 +97,8 @@ export type ResolvedLine =
 	| { id: string; kind: "curve3"; x: Compiled; y: Compiled; z: Compiled }
 	| { id: string; kind: "param-surface"; x: Compiled; y: Compiled; z: Compiled }
 	| { id: string; kind: "points3"; points: [number, number, number][] }
+	/** A function definition that is not itself drawn (f(t) = … on a 2D graph still defines f). */
+	| { id: string; kind: "function"; name: string; params: string[] }
 	/** A line with no variables: a calculation, shown as its value and not drawn. */
 	| { id: string; kind: "value"; value: number }
 	| { id: string; kind: "empty" }
@@ -124,9 +132,30 @@ type Draft =
 	| { kind: "points3"; fns: [Compiled, Compiled, Compiled][] };
 type Classified = { line: Draft; define?: { name: string; fn: Compiled } };
 
-function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode, degrees: boolean): Classified {
+/** The graph's own functions: the names (known before any body is parsed,
+ *  so f(…) reads as a call everywhere) and the table bodies are compiled against. */
+interface FunctionContext {
+	names: ReadonlySet<string>;
+	table: Record<string, UserFunction>;
+}
+
+/** A line that starts like a function definition: f(x) = or g(x, y) =. */
+const LETTER = "[A-Za-zα-ωΑ-Ω]";
+export const FUNCTION_START = new RegExp(`^\\s*(${LETTER})\\s*\\(\\s*(${LETTER}(?:\\s*,\\s*${LETTER})*)\\s*\\)\\s*=`);
+const NOT_A_FUNCTION_NAME = new Set(["x", "y", "z", "t", "r", "u", "v", "e"]);
+
+/** The name and parameters a definition line declares, or null when it is not one. */
+export function functionHeader(text: string): { name: string; params: string[] } | null {
+	const match = FUNCTION_START.exec(text);
+	if (!match || NOT_A_FUNCTION_NAME.has(match[1]!)) return null;
+	const params = match[2]!.split(",").map((param) => param.trim());
+	return new Set(params).size === params.length ? { name: match[1]!, params } : null;
+}
+
+function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode, degrees: boolean, fns: FunctionContext): Classified {
 	const RESERVED = mode === "3d" ? RESERVED_3D : RESERVED_2D;
-	const compile = (expr: Expr) => compileExpr(expr, { degrees });
+	const compile = (expr: Expr) => compileExpr(expr, { degrees, functions: fns.table });
+	const parse = (list: ReturnType<typeof tokenize>) => parseTokens(list, fns.names);
 	const tokens = tokenize(text);
 	if (tokens.length === 0) return { line: { kind: "empty" } };
 	const sides = splitEquation(tokens);
@@ -148,10 +177,28 @@ function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode, de
 		check(right, []);
 		return { line: { kind: "definition", name, value: NaN, slider: right.type === "num" || (right.type === "neg" && right.arg.type === "num") }, define: { name, fn: compile(right) } };
 	};
+	// f(x) = …: a function definition. On a flat graph a function of one
+	// variable is also drawn as y = f(x); in 3D one of two variables as z = f(x, y).
+	const header = sides ? functionHeader(text) : null;
+	if (header && sides && fns.names.has(header.name)) {
+		const body = scalar(parse(sides.right));
+		check(body, header.params);
+		const fn = compile(body);
+		const drawnOn = mode === "2d" && header.params.length === 1 ? ["x"] : mode === "3d" && header.params.length === 2 ? ["x", "y"] : null;
+		if (!drawnOn) return { line: { kind: "function", name: header.name, params: header.params } };
+		const drawn: Compiled = (scope) => {
+			const local: Scope = Object.create(scope);
+			header.params.forEach((param, index) => {
+				local[param] = scope[drawnOn[index]!] ?? NaN;
+			});
+			return fn(local);
+		};
+		return { line: mode === "2d" ? { kind: "explicit-y", fn: drawn } : { kind: "surface", axis: "z", fn: drawn } };
+	}
 	if (mode === "3d") return classify3d();
 
 	if (!sides) {
-		const list = parseTokens(tokens);
+		const list = parse(tokens);
 		if (list.some((item) => item.type === "matrix")) throw new ExprError("Matrices arrive in a later version of the grapher.");
 		if (list.every((item) => item.type === "tuple")) {
 			const tuples = list as Extract<Expr, { type: "tuple" }>[];
@@ -176,13 +223,8 @@ function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode, de
 	}
 
 	if (sides.left.length === 0 || sides.right.length === 0) throw new ExprError("Something is missing on one side of =.");
-	// f(x) = … reads as f·x to the parser; say what it is instead.
-	const [head, open, , close] = sides.left;
-	if (sides.left.length === 4 && head?.kind === "name" && head.name.length === 1 && !RESERVED.has(head.name) && open?.kind === "op" && open.op === "(" && close?.kind === "op" && close.op === ")") {
-		throw new ExprError("Write this as y = … (function definitions like f(x) = … are not supported yet).");
-	}
-	const left = scalar(parseTokens(sides.left));
-	const right = scalar(parseTokens(sides.right));
+	const left = scalar(parse(sides.left));
+	const right = scalar(parse(sides.right));
 	const rightVars = variablesOf(right);
 	if (variablesOf(left).has("z") || rightVars.has("z")) throw new ModeError("This uses z, so it needs a 3D graph.", "3d");
 	if (left.type === "call") throw new ExprError("Write this as y = … (function definitions like f(x) = … are not supported yet).");
@@ -210,7 +252,7 @@ function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode, de
 
 	function classify3d(): Classified {
 		if (!sides) {
-			const list = parseTokens(tokens);
+			const list = parse(tokens);
 			if (list.some((item) => item.type === "matrix")) throw new ExprError("Matrices arrive in a later version of the grapher.");
 			if (list.every((item) => item.type === "tuple")) {
 				const tuples = list as Extract<Expr, { type: "tuple" }>[];
@@ -239,8 +281,8 @@ function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode, de
 			return { line: { kind: "surface", axis: "z", fn: compile(expr) } };
 		}
 		if (sides.left.length === 0 || sides.right.length === 0) throw new ExprError("Something is missing on one side of =.");
-		const left = scalar(parseTokens(sides.left));
-		const right = scalar(parseTokens(sides.right));
+		const left = scalar(parse(sides.left));
+		const right = scalar(parse(sides.right));
 		const rightVars = variablesOf(right);
 		if (left.type === "var") {
 			const name = left.name;
@@ -265,7 +307,11 @@ export interface ResolvedPlot {
 	lines: ResolvedLine[];
 	/** The values of every definition, by name. */
 	scope: Scope;
+	/** Lines whose every point is an integral: drawn with fewer samples. */
+	costly: Set<string>;
 }
+
+const COSTLY = /\bint\s*\(|∫/;
 
 /** Understand every line, top to bottom. A definition is usable by the lines below and above it. */
 export function resolvePlot(doc: Pick<PlotDoc, "lines"> & { mode?: PlotMode }): ResolvedPlot {
@@ -273,18 +319,43 @@ export function resolvePlot(doc: Pick<PlotDoc, "lines"> & { mode?: PlotMode }): 
 	const degrees = (doc as { angles?: unknown }).angles === "degrees";
 	const scope: Scope = {};
 	const defined = new Set<string>();
-	// Definitions first, in order, so a curve may use a slider written below it.
+	// Function names first: f(…) must read as a call on every line, including
+	// inside other functions' bodies and above the definition.
+	const names = new Set<string>();
+	const duplicates = new Set<string>();
+	for (const line of doc.lines) {
+		const header = functionHeader(line.text);
+		if (!header) continue;
+		if (names.has(header.name)) duplicates.add(line.id);
+		else names.add(header.name);
+	}
+	const fns: FunctionContext = { names, table: {} };
+	for (const line of doc.lines) {
+		const header = functionHeader(line.text);
+		if (!header || duplicates.has(line.id) || line.problem) continue;
+		try {
+			const tokens = tokenize(line.text.slice(0, MAX_LINE_CHARS));
+			const sides = splitEquation(tokens);
+			const body = sides ? parseTokens(sides.right, names) : [];
+			if (body.length === 1 && body[0]!.type !== "tuple" && body[0]!.type !== "matrix") fns.table[header.name] = { params: header.params, body: body[0]! };
+		} catch {
+			// the line reports its own error when it is classified below
+		}
+	}
+	// Definitions next, in order, so a curve may use a slider written below it.
 	const drafts = new Map<string, Classified | { error: string; fix?: PlotMode }>();
 	const tryClassify = (line: PlotLine): Classified | { error: string; fix?: PlotMode } => {
+		if (line.problem) return { error: line.problem };
+		if (duplicates.has(line.id)) return { error: `"${functionHeader(line.text)!.name}" is already defined above.` };
 		try {
-			return classify(line.text.slice(0, MAX_LINE_CHARS), defined, mode, degrees);
+			return classify(line.text.slice(0, MAX_LINE_CHARS), defined, mode, degrees, fns);
 		} catch (error) {
 			if (error instanceof ModeError) return { error: error.message, fix: error.fix };
 			return { error: error instanceof ExprError ? error.message : "This could not be read." };
 		}
 	};
 	for (const line of doc.lines) {
-		if (!DEFINITION_START.test(line.text)) continue;
+		if (!DEFINITION_START.test(line.text) || functionHeader(line.text)) continue;
 		const draft = tryClassify(line);
 		if ("error" in draft || !draft.define) continue;
 		const value = draft.define.fn(scope);
@@ -301,7 +372,7 @@ export function resolvePlot(doc: Pick<PlotDoc, "lines"> & { mode?: PlotMode }): 
 		if (draft.line.kind === "definition" && !drafts.has(line.id)) return { id: line.id, kind: "error", error: "This definition could not be used." };
 		return { id: line.id, ...draft.line };
 	});
-	return { lines, scope };
+	return { lines, scope, costly: new Set(doc.lines.filter((line) => COSTLY.test(line.text)).map((line) => line.id)) };
 }
 
 const fmt = (value: number) => (Number.isFinite(value) ? String(Math.round(value * 1e4) / 1e4) : String(value));
@@ -322,11 +393,18 @@ export function parameterRanges(doc: PlotDoc): { t: [number, number]; u: [number
 	return { t: [doc.tMin ?? 0, doc.tMax ?? turn], u: [doc.uMin ?? 0, doc.uMax ?? turn], v: [doc.vMin ?? 0, doc.vMax ?? turn] };
 }
 
+/** The line without what the editor remembered: its text now speaks for itself. */
+export function withoutTypeset(line: PlotLine): PlotLine {
+	const { latex: _latex, problem: _problem, ...rest } = line;
+	return rest;
+}
+
 /** Replace a definition line's number (a dragged slider). */
 export function withSliderValue(doc: PlotDoc, lineId: string, value: number): PlotDoc {
 	return {
 		...doc,
-		lines: doc.lines.map((line) => (line.id === lineId ? { ...line, text: line.text.replace(/=.*$/, `= ${fmt(value)}`) } : line)),
+		// The typeset form is dropped: the editor re-typesets from the new text.
+		lines: doc.lines.map((line) => (line.id === lineId ? { ...withoutTypeset(line), text: line.text.replace(/=.*$/, `= ${fmt(value)}`) } : line)),
 	};
 }
 
@@ -347,6 +425,7 @@ export function cleanPlotDoc(raw: unknown): PlotDoc | null {
 		lines.push({
 			id: typeof line.id === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(line.id) ? line.id : `l${index + 1}`,
 			text: line.text.slice(0, MAX_LINE_CHARS),
+			...(typeof line.latex === "string" && line.latex.length <= MAX_LINE_CHARS * 6 ? { latex: line.latex } : {}),
 			color: Number.isInteger(line.color) ? Math.abs(line.color as number) % PLOT_COLORS.length : index % PLOT_COLORS.length,
 			...(line.hidden === true ? { hidden: true } : {}),
 			...(min !== undefined && max !== undefined && min < max ? { min, max } : {}),
