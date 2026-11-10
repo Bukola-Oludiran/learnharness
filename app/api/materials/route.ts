@@ -1,5 +1,5 @@
 import { materials } from "@/src/server";
-import { MAX_MATERIAL_BYTES } from "@/src/core";
+import { MAX_BOOK_BYTES, MAX_MATERIAL_BYTES } from "@/src/core";
 
 /** A marked test: several page photos (or one PDF) in one multipart body. */
 const MAX_TEST_BODY_BYTES = 2 * MAX_MATERIAL_BYTES + 1024 * 1024;
@@ -45,10 +45,17 @@ export async function POST(req: Request) {
 		if (!outcome.ok) return Response.json({ error: outcome.error, code: outcome.code }, { status: outcome.status });
 		return Response.json({ material: outcome.material });
 	}
-	if (Number(req.headers.get("content-length") ?? "0") > MAX_MATERIAL_BYTES) {
-		return Response.json({ error: "Too big. Max 25 MB.", code: "too_large" }, { status: 413 });
+	// kind=book: one PDF or EPUB as the raw body, stored and split into sections.
+	const book = url.searchParams.get("kind") === "book";
+	if (Number(req.headers.get("content-length") ?? "0") > (book ? MAX_BOOK_BYTES : MAX_MATERIAL_BYTES)) {
+		return Response.json({ error: book ? "Too big. Max 200 MB." : "Too big. Max 25 MB.", code: "too_large" }, { status: 413 });
 	}
 	const bytes = new Uint8Array(await req.arrayBuffer());
+	if (book) {
+		const outcome = materials.uploadBook(target, url.searchParams.get("name") ?? "", bytes);
+		if (!outcome.ok) return Response.json({ error: outcome.error, code: outcome.code }, { status: outcome.status });
+		return Response.json({ material: outcome.material });
+	}
 	const outcome = materials.uploadMaterial(target, url.searchParams.get("name") ?? "", bytes);
 	if (!outcome.ok) return Response.json({ error: outcome.error, code: outcome.code }, { status: outcome.status });
 	return Response.json({ material: outcome.material });

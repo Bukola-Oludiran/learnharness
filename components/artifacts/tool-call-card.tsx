@@ -37,6 +37,10 @@ function headlineArg(tool: string, input: unknown): string {
 	if (tool === "ingest_material" && Array.isArray(inp.paths) && typeof inp.paths[0] === "string") {
 		return inp.paths.length > 1 ? `${inp.paths[0]} +${inp.paths.length - 1}` : inp.paths[0];
 	}
+	// Fork (FORK.md): read_material — the section, or the book when listing sections.
+	if (tool === "read_material") {
+		return [inp.material, inp.section].filter((value): value is string => typeof value === "string" && value.length > 0).join(" ");
+	}
 	// list_propositions: the session id is the call's subject — the
 	// collapsed line reads "list_propositions chat_…". Shown as given
 	// (the id is exactly what list_sessions reported to the model).

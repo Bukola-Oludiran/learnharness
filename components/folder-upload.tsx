@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { FolderUpIcon } from "lucide-react";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
 import { cn } from "@/lib/utils";
-import { MAX_FOLDER_FILES, folderFileVerdict, type FolderChoice } from "@/src/core";
+import { LONG_NOTES_PAGES, MAX_FOLDER_FILES, MAX_MATERIAL_BYTES, folderFileVerdict, pdfPageCountHint, type FolderChoice } from "@/src/core";
 
 /**
  * Folder upload (fork, phase 3b2 — see FORK.md): pick a folder, then a
@@ -24,6 +24,7 @@ export interface FolderItem {
 	size: number;
 	choice: FolderChoice;
 	testable: boolean;
+	bookable: boolean;
 	refused?: string;
 }
 
@@ -42,13 +43,19 @@ export function folderItems(files: readonly { name: string; size: number; path: 
 		.sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }));
 }
 
-/** "12 notes · 3 marked tests · 4 skipped". Pure. */
-export function folderSummary(items: readonly FolderItem[]): { notes: number; tests: number; skipped: number; label: string } {
+/** "12 sets of notes · 3 marked tests · 1 book · 4 skipped". Pure. */
+export function folderSummary(items: readonly FolderItem[]): { notes: number; tests: number; books: number; skipped: number; label: string } {
 	const notes = items.filter((item) => item.choice === "notes").length;
 	const tests = items.filter((item) => item.choice === "test").length;
-	const skipped = items.length - notes - tests;
-	const label = [`${notes} ${notes === 1 ? "set of notes" : "sets of notes"}`, `${tests} marked ${tests === 1 ? "test" : "tests"}`, `${skipped} skipped`].join(" · ");
-	return { notes, tests, skipped, label };
+	const books = items.filter((item) => item.choice === "book").length;
+	const skipped = items.length - notes - tests - books;
+	const label = [
+		`${notes} ${notes === 1 ? "set of notes" : "sets of notes"}`,
+		`${tests} marked ${tests === 1 ? "test" : "tests"}`,
+		...(books > 0 ? [`${books} ${books === 1 ? "book" : "books"}`] : []),
+		`${skipped} skipped`,
+	].join(" · ");
+	return { notes, tests, books, skipped, label };
 }
 
 /** The checklist dialog's pure body — exported for render tests. */
@@ -67,7 +74,7 @@ export function FolderChecklistBody({
 	onClose: () => void;
 }) {
 	const summary = folderSummary(items);
-	const chosen = summary.notes + summary.tests;
+	const chosen = summary.notes + summary.tests + summary.books;
 	const tooMany = items.length > MAX_FOLDER_FILES;
 	const busy = progress !== null;
 	return (
@@ -92,8 +99,8 @@ export function FolderChecklistBody({
 			) : (
 				<>
 					<p className="mt-2 text-sm text-muted-foreground">
-						Check what each file is. Nothing is uploaded or read until you press Start. Each file is read by your model plan: at least two model calls,
-						and one more for every photo or scanned page. Files are processed two at a time, and you can keep using the app while they run.
+						Check what each file is. Nothing is uploaded or read until you press Start. Notes and tests are read by your model plan: at least two model
+						calls each, and one more for every photo or scanned page. A book is only stored and split into sections. Files are processed two at a time, and you can keep using the app while they run.
 					</p>
 					<p className="mt-1 text-xs text-muted-foreground">
 						A marked test photographed as several separate images should be skipped here and uploaded with “Upload marked test”, so its pages stay
@@ -124,8 +131,9 @@ export function FolderChecklistBody({
 										onChange={(e) => onChoice(index, e.target.value as FolderChoice)}
 										className="w-28 shrink-0 rounded-sm border border-input bg-background px-1 py-0.5 text-xs"
 									>
-										<option value="notes">Notes</option>
+										{item.size <= MAX_MATERIAL_BYTES && <option value="notes">Notes</option>}
 										{item.testable && <option value="test">Marked test</option>}
+										{item.bookable && <option value="book">Book</option>}
 										<option value="skip">Skip</option>
 									</select>
 								)}
@@ -158,7 +166,13 @@ async function uploadOne(file: File, path: string, choice: FolderChoice): Promis
 	try {
 		const query = `path=${encodeURIComponent(path)}`;
 		let res: Response;
-		if (choice === "test") {
+		if (choice === "book") {
+			res = await fetch(`/api/materials?kind=book&name=${encodeURIComponent(file.name)}&${query}`, {
+				method: "POST",
+				headers: { "Content-Type": "application/octet-stream" },
+				body: file,
+			});
+		} else if (choice === "test") {
 			const form = new FormData();
 			form.append("files", file);
 			res = await fetch(`/api/materials?kind=test&${query}`, { method: "POST", body: form });
@@ -207,6 +221,21 @@ export function FolderUpload({ disabled, onDone }: { disabled?: boolean; onDone:
 		const files = new Map<string, File>();
 		for (const file of list) files.set(file.webkitRelativePath || file.name, file);
 		setPicked({ files, items: folderItems([...files].map(([path, file]) => ({ name: file.name, size: file.size, path }))) });
+		// The length hint: a PDF whose page count can be read from its bytes
+		// and is long is pre-selected as a book. Best effort, off the main path.
+		for (const [path, file] of files) {
+			if (!/\.pdf$/i.test(file.name) || file.size > MAX_MATERIAL_BYTES) continue;
+			void file
+				.arrayBuffer()
+				.then((buffer) => {
+					const pages = pdfPageCountHint(new Uint8Array(buffer));
+					if (pages === undefined || pages <= LONG_NOTES_PAGES) return;
+					setPicked((prev) =>
+						prev ? { ...prev, items: prev.items.map((item) => (item.path === path && item.choice === "notes" && item.bookable ? { ...item, choice: "book" } : item)) } : prev,
+					);
+				})
+				.catch(() => undefined);
+		}
 	};
 
 	const start = async () => {

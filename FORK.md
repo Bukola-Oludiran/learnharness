@@ -53,8 +53,9 @@ Add one row per edit, in the same pull request that makes it.
 | `src/server/chat-handler.ts` | Calls `assertAttachmentsUploaded` before `inputAppends`. | Photo answers | 2 |
 | `src/agent/teacher-agent.ts` | `AgentBuildOptions.extraTools`, healed and appended to the teacher's registry in `createTeacherAgent` (ignored when `tools` is given). | Tutor material tools | 3c |
 | `src/server/chat-handler.ts` | Imports `material-tools.ts`; passes `extraTools: materialToolsFor(chatId)` in `agentOpts`. | Tutor material tools | 3c |
-| `components/artifacts/index.ts` | Registers `ToolCallCard` for `ingest_material` and `material_status`. | Tutor material tools | 3c |
-| `components/artifacts/tool-call-card.tsx` | `headlineArg` shows `ingest_material`'s first path and how many more. | Tutor material tools | 3c |
+| `components/artifacts/index.ts` | Registers `ToolCallCard` for `ingest_material`, `material_status` and `read_material`. | Tutor material tools | 3c, 4a |
+| `components/artifacts/tool-call-card.tsx` | `headlineArg` shows `ingest_material`'s first path and how many more, and `read_material`'s book and section. | Tutor material tools | 3c, 4a |
+| `next.config.ts` | `proxyClientMaxBodySize` raised to the book cap (200 MiB plus headroom); imports `MAX_BOOK_BYTES`. | Books | 4a |
 | `app/api/chats/route.ts` | `POST` accepts `courseId`: 404 before the create when unknown, then adds the new session to the course. | Courses | 1 |
 | `components/start-session.ts` | `SessionCreation.courseId`. | Courses | 1 |
 | `components/new-session.tsx` | `courseId` parameter on `startDraftSession` and prop on `NewSession`. | Courses | 1 |
@@ -91,6 +92,12 @@ Add one row per edit, in the same pull request that makes it.
 - Word (.docx) reading takes body paragraphs, headings and tables. Headers, footers, footnotes, comments and text boxes are not read; pictures are transcribed after the text, not at their place in it.
 - The tutor's material tools (`ingest_material`, `material_status`) exist in teaching sessions only, are not in `TOGGLEABLE_TOOLS` (no Settings switch) and are not described in the prompt fragments; their descriptions carry the rules. The tutor is not woken when a material finishes.
 - The compaction threshold estimate does not count the two material tools' schemas.
+- A book is stored and sectioned, never extracted. Its scanned pages are read by the vision model the first time their section is read, with no review step; the tutor is told the text is AI-read. A read waits up to 20 s (tools time out at 30 s) and otherwise reports which pages are still being read.
+- A book belongs to no course until the syllabus (phase 4b) attaches it, including one the tutor adds from a course session.
+- Sections are two levels deep and read-only. EPUB sections follow chapter files: several contents entries into one file collapse into the first. EPUB pictures are dropped; DRM-protected EPUBs are refused.
+- A PDF with no bookmarks is sectioned by the cheap model from each page's opening lines, then by equal 20-page runs if that fails. A mostly scanned PDF with no bookmarks goes straight to equal runs.
+- The folder checklist's book pre-selection reads a PDF's page count from its bytes, which works only when the page tree is uncompressed. The server-side pause for notes PDFs over 80 pages covers the rest.
+- Before 4a the proxy body limit was 26 MiB, so a marked test over that size was refused despite its 50 MB limit.
 - Vision transcription usage is not written to any usage log (upstream's notes pipeline logs its own extraction usage on the source record).
 
 ## Local app

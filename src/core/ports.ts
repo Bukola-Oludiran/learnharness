@@ -19,6 +19,7 @@ import type {
 	MaterialRecord,
 	Evidence,
 	TestReading,
+	BookPage,
 	GraphChain,
 	GraphNode,
 	JobKind,
@@ -117,6 +118,12 @@ export interface MaterialStore {
 	/** The converted transcript, or null before conversion. */
 	readText(id: string): string | null;
 	writeText(id: string, text: string): void;
+	/** A book's pages as converted at upload (book.json), or null. */
+	readBookPages(id: string): BookPage[] | null;
+	writeBookPages(id: string, pages: readonly BookPage[]): void;
+	/** Scanned book pages a vision model has read so far, by page number. */
+	readPageTranscripts(id: string): Map<number, string>;
+	writePageTranscript(id: string, page: number, text: string): void;
 	/** Remove the material's folder. False when the id is unknown. */
 	deleteMaterial(id: string): boolean;
 }

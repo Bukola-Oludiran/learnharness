@@ -56,4 +56,5 @@ export const artifactRenderers: Record<string, ComponentType<ArtifactPartProps>>
 	// Fork (FORK.md): the tutor's material tools, same quiet card.
 	ingest_material: ToolCallCard,
 	material_status: ToolCallCard,
+	read_material: ToolCallCard,
 };

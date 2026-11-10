@@ -10,7 +10,7 @@ import * as path from "node:path";
 import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { MaterialStore } from "../core/ports.ts";
-import { CURRENT_MATERIAL_VERSION, MATERIAL_ID_PATTERN, type MaterialRecord, type TestReading } from "../core/contracts.ts";
+import { CURRENT_MATERIAL_VERSION, MATERIAL_ID_PATTERN, type BookPage, type MaterialRecord, type TestReading } from "../core/contracts.ts";
 import { writeFileAtomicSync } from "./atomic-write.ts";
 
 function materialDir(id: string): string {
@@ -20,6 +20,8 @@ function materialDir(id: string): string {
 const recordFile = (id: string) => path.join(materialDir(id), "record.json");
 const textFile = (id: string) => path.join(materialDir(id), "text.md");
 const readingFile = (id: string) => path.join(materialDir(id), "test.json");
+const bookFile = (id: string) => path.join(materialDir(id), "book.json");
+const pagesDir = (id: string) => path.join(materialDir(id), "pages");
 /** original.<ext> (a single upload) or original-<n>.<ext> (page n of several). */
 const ORIGINAL_NAME = /^original(?:-(\d+))?\.[a-z0-9]{1,8}$/;
 
@@ -120,6 +122,47 @@ function writeText(id: string, text: string): void {
 	writeFileAtomicSync(textFile(id), text);
 }
 
+function readBookPages(id: string): BookPage[] | null {
+	try {
+		const parsed = JSON.parse(fs.readFileSync(bookFile(id), "utf-8")) as BookPage[];
+		return Array.isArray(parsed) ? parsed : null;
+	} catch {
+		return null;
+	}
+}
+
+function writeBookPages(id: string, pages: readonly BookPage[]): void {
+	if (!fs.existsSync(recordFile(id))) throw new Error(`Material not found: ${id}`);
+	writeFileAtomicSync(bookFile(id), JSON.stringify(pages));
+}
+
+function readPageTranscripts(id: string): Map<number, string> {
+	const out = new Map<number, string>();
+	let names: string[];
+	try {
+		names = fs.readdirSync(pagesDir(id));
+	} catch {
+		return out; // nothing read yet
+	}
+	for (const name of names) {
+		const match = /^(\d+)\.md$/.exec(name);
+		if (!match) continue;
+		try {
+			out.set(Number(match[1]), fs.readFileSync(path.join(pagesDir(id), name), "utf-8"));
+		} catch {
+			// a page lost mid-write is simply read again
+		}
+	}
+	return out;
+}
+
+function writePageTranscript(id: string, page: number, text: string): void {
+	if (!fs.existsSync(recordFile(id))) return; // deleted mid-read
+	if (!Number.isInteger(page) || page < 1) throw new Error(`Invalid page: ${page}`);
+	fs.mkdirSync(pagesDir(id), { recursive: true });
+	writeFileAtomicSync(path.join(pagesDir(id), `${page}.md`), text);
+}
+
 function deleteMaterial(id: string): boolean {
 	try {
 		if (!fs.existsSync(recordFile(id))) return false;
@@ -141,5 +184,9 @@ export const materialStore: MaterialStore = {
 	writeReading,
 	readText,
 	writeText,
+	readBookPages,
+	writeBookPages,
+	readPageTranscripts,
+	writePageTranscript,
 	deleteMaterial,
 };

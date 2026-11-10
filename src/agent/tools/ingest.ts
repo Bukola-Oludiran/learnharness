@@ -4,7 +4,7 @@ import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
 import { resolveSourcePath } from "./fs-shared.ts";
-import { MAX_MATERIAL_BYTES, MAX_TEST_PAGES, type MaterialKind, type MaterialView } from "../../core/contracts.ts";
+import { MAX_BOOK_BYTES, MAX_MATERIAL_BYTES, MAX_TEST_PAGES, type MaterialKind, type MaterialView } from "../../core/contracts.ts";
 import { ingestResultText, materialStatusLine } from "../../core/material.ts";
 
 /**
@@ -17,11 +17,15 @@ import { ingestResultText, materialStatusLine } from "../../core/material.ts";
  *                  lesson carries on; review is the learner's, in the
  *                  Library).
  * material_status  where added files stand.
+ * read_material    (phase 4a) the learner's books, section by section: a
+ *                  book is stored, never extracted, and taught from as
+ *                  the learner covers it.
  *
  * The agent layer may not import the server, so the materials service
  * arrives as `deps` (wired in server/material-tools.ts). Paths go through
  * the shared file-access policy, like read and show_image.
- * Descriptions and result wording approved by the owner, 2026-11-10.
+ * Descriptions and result wording approved by the owner, 2026-11-10
+ * (read_material and the book kind the same day).
  */
 
 export const MAX_INGEST_PATHS = 10;
@@ -32,14 +36,19 @@ export type IngestStart = { ok: true; id: string } | { ok: false; error: string 
 export interface MaterialToolDeps {
 	/** Start one material from files already read. Notes take one file; a
 	 *  test takes its pages. Never throws for a refusal the learner can fix. */
-	ingest: (kind: Extract<MaterialKind, "notes" | "test">, files: { name: string; bytes: Uint8Array }[]) => IngestStart;
+	ingest: (kind: MaterialKind, files: { name: string; bytes: Uint8Array }[]) => IngestStart;
 	/** Materials by id, or (no ids) every material, oldest first. */
 	materials: (ids?: readonly string[]) => MaterialView[];
+	/** read_material's text: the books, one book's sections, or one
+	 *  section. Throws with a message the tutor can act on. */
+	read: (input: { material?: string; section?: string; part?: number }) => Promise<string>;
 }
 
 const ingestInput = Type.Object({
-	kind: Type.Union([Type.Literal("notes"), Type.Literal("test")], {
-		description: "notes: each path becomes its own material. test: all paths are the pages, in order, of ONE marked test.",
+	kind: Type.Union([Type.Literal("notes"), Type.Literal("test"), Type.Literal("book")], {
+		description:
+			"notes: each path becomes its own material. test: all paths are the pages, in order, of ONE marked test. " +
+			"book: each path (PDF or EPUB) is stored and split into sections for read_material; it is not extracted into the graph.",
 	}),
 	paths: Type.Array(Type.String({ minLength: 1 }), {
 		minItems: 1,
@@ -52,16 +61,22 @@ const statusInput = Type.Object({
 	ids: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 50, description: "Material ids from ingest_material. Omit to list the ten most recent." })),
 });
 
+const readInput = Type.Object({
+	material: Type.Optional(Type.String({ minLength: 1, description: "A book's id. Omit to list the learner's books." })),
+	section: Type.Optional(Type.String({ minLength: 1, description: "A section id from the book's section list, such as s3 or s3.2. Omit to list the sections." })),
+	part: Type.Optional(Type.Integer({ minimum: 1, description: "Which part of a long section; 1 when omitted." })),
+});
+
 type Loaded = { name: string; bytes: Uint8Array } | { name: string; error: string };
 
 /** Read one learner file through the file-access policy, bounded before any byte is read. */
-async function load(rawPath: string): Promise<Loaded> {
+async function load(rawPath: string, maxBytes = MAX_MATERIAL_BYTES): Promise<Loaded> {
 	const name = path.basename(rawPath);
 	try {
 		const absolute = resolveSourcePath(rawPath);
 		const stat = await fs.stat(absolute);
 		if (!stat.isFile()) return { name, error: "It is not a file." };
-		if (stat.size > MAX_MATERIAL_BYTES) return { name, error: "Too big. Max 25 MB." };
+		if (stat.size > maxBytes) return { name, error: `Too big. Max ${Math.round(maxBytes / (1024 * 1024))} MB.` };
 		return { name: path.basename(absolute), bytes: new Uint8Array(await fs.readFile(absolute)) };
 	} catch (error) {
 		const reason = (error as NodeJS.ErrnoException).code === "ENOENT" ? "No such file." : error instanceof Error ? error.message : String(error);
@@ -101,7 +116,7 @@ export function createMaterialTools(deps: MaterialToolDeps): AgentTool<any>[] {
 				if (refused.length === 0) begin(pages[0]!.name, pages);
 			} else {
 				for (const rawPath of new Set(paths)) {
-					const file = await load(rawPath);
+					const file = await load(rawPath, kind === "book" ? MAX_BOOK_BYTES : MAX_MATERIAL_BYTES);
 					if ("error" in file) refused.push(file);
 					else begin(file.name, [file]);
 				}
@@ -128,5 +143,19 @@ export function createMaterialTools(deps: MaterialToolDeps): AgentTool<any>[] {
 		}),
 	};
 
-	return [ingestMaterial, materialStatus];
+	const readMaterial: AgentTool<typeof readInput> = {
+		name: "read_material",
+		label: "read_material",
+		description: [
+			"Read the learner's books, section by section. A book is stored in their library and split into sections; nothing in it is in their knowledge graph until you teach it.",
+			"With no arguments it lists the learner's books. With material it lists that book's sections. With material and section it returns that section's text. " +
+				"Long sections come in parts; the result says how to get the next one.",
+			"Read the section you are about to teach before teaching it, and teach from what it says. Text marked AI-read came from scanned pages and may contain misreadings: " +
+				"where it looks wrong, say so instead of teaching it as fact. Scanned sections are read on first use; if the result says pages are still being read, tell the learner and call again shortly.",
+		].join("\n\n"),
+		parameters: readInput,
+		execute: serverExecute("read_material", readInput, ({ material, section, part }): Promise<string> => deps.read({ material, section, part })),
+	};
+
+	return [ingestMaterial, materialStatus, readMaterial];
 }

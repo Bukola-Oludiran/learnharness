@@ -12,11 +12,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
 /** Approve a material waiting for review. `text` (notes) or `reading`
  *  (tests), when sent, replaces what was read first — the learner's
- *  corrections. */
+ *  corrections. `choice` ("book" | "notes") instead answers a long PDF
+ *  paused for that decision. */
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
-	const body = (await req.json().catch(() => null)) as { text?: unknown; reading?: unknown } | null;
-	const outcome = materials.approveMaterial(id, { text: body?.text, reading: body?.reading });
+	const body = (await req.json().catch(() => null)) as { text?: unknown; reading?: unknown; choice?: unknown } | null;
+	const outcome = body?.choice !== undefined ? materials.chooseMaterialKind(id, body.choice) : materials.approveMaterial(id, { text: body?.text, reading: body?.reading });
 	if (!outcome.ok) return Response.json({ error: outcome.error, code: outcome.code }, { status: outcome.status });
 	return Response.json({ material: outcome.material });
 }
