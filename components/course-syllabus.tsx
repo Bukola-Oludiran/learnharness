@@ -1,18 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon } from "lucide-react";
 import { BrailleSpinner } from "@/components/braille-spinner";
 import { useServerEvent, useServerResync } from "@/components/server-events";
+import { SessionStarter } from "@/components/start-session";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { SYLLABUS_NOTE_MAX, UNIT_TITLE_MAX, buildBlocker, type CourseRecord, type MaterialView, type SyllabusUnit } from "@/src/core";
+import { SYLLABUS_NOTE_MAX, UNIT_TITLE_MAX, buildBlocker, nextUnit, type CourseRecord, type MaterialView, type SyllabusUnit } from "@/src/core";
 
 /**
  * A course's books and syllabus (fork, phase 4b — see FORK.md). Books are
  * picked from the library; the syllabus is drafted by a model only when
  * the learner asks, then adjusted by hand: rename, reorder, skip, delete,
- * or rebuild with a note. The server owns every state; this view refetches
+ * or rebuild with a note. Phase 4c: each unit starts (or reopens) its own
+ * teaching session, "Continue course" goes to the next unit that is ready,
+ * and a unit can be marked covered or not by hand. The server owns every state; this view refetches
  * on `courses-changed` and `materials-changed`.
  */
 
@@ -128,6 +132,9 @@ export function CourseBooksBody({
 	);
 }
 
+/** The first message of a unit's session: the learner's opening request. */
+export const unitOpeningPrompt = (unit: Pick<SyllabusUnit, "title">) => `Start the unit: ${unit.title}`;
+
 /** One unit row. Pure — exported for render tests. */
 export function UnitRow({
 	unit,
@@ -145,7 +152,19 @@ export function UnitRow({
 	onMove,
 	onSkip,
 	onDelete,
+	hasSession = false,
+	starting = false,
+	onStart,
+	onCover,
 }: {
+	/** The unit already has a session: Start becomes Open session. */
+	hasSession?: boolean;
+	/** A session is being created for some unit. */
+	starting?: boolean;
+	/** Start the unit's session, or open the one it has. */
+	onStart?: () => void;
+	/** The learner's override of covered / not covered. */
+	onCover?: (covered: boolean) => void;
 	unit: SyllabusUnit;
 	number: number;
 	units: readonly SyllabusUnit[];
@@ -208,6 +227,16 @@ export function UnitRow({
 			</span>
 			{!renaming && (
 				<span className="flex shrink-0 items-center gap-0.5">
+					{onStart && unit.status !== "skipped" && (
+						<button type="button" data-testid="syllabus-unit-start" onClick={onStart} disabled={starting} className={ACTION}>
+							{hasSession ? "Open session" : "Start"}
+						</button>
+					)}
+					{onCover && unit.status !== "skipped" && (
+						<button type="button" data-testid="syllabus-unit-cover" onClick={() => onCover(unit.status !== "covered")} className={QUIET}>
+							{unit.status === "covered" ? "Not covered" : "Mark covered"}
+						</button>
+					)}
 					<button type="button" data-testid="syllabus-unit-up" aria-label={`Move ${unit.title} up`} onClick={() => onMove("up")} disabled={first} className={ICON}>
 						<ArrowUpIcon className="size-3" />
 					</button>
@@ -242,8 +271,13 @@ export function SyllabusBody({
 	onNote,
 	onBuild,
 	onToggleRebuild,
+	onContinue,
+	starting = false,
 	children,
 }: {
+	/** Go to the next unit that is ready (phase 4c). */
+	onContinue?: () => void;
+	starting?: boolean;
 	course: Pick<CourseRecord, "goal" | "syllabus" | "syllabusError">;
 	readyBooks: number;
 	building: boolean;
@@ -261,6 +295,8 @@ export function SyllabusBody({
 	const blocker = buildBlocker(course, readyBooks);
 	const units = course.syllabus?.units ?? [];
 	const problem = error ?? course.syllabusError ?? null;
+	const upNext = course.syllabus ? nextUnit(course.syllabus) : null;
+	const allDone = units.length > 0 && !upNext;
 	const notePanel = (confirmLabel: string) => (
 		<div data-testid="syllabus-note-panel" className="mt-2 rounded-lg border border-border/60 p-3">
 			<label className="block text-xs text-muted-foreground" htmlFor="syllabus-note">
@@ -287,6 +323,12 @@ export function SyllabusBody({
 		<section className="mt-8" data-testid="course-syllabus">
 			<div className="flex items-center justify-between">
 				<h2 className={SECTION}>Syllabus</h2>
+				<span className="flex-1" />
+				{!building && upNext && onContinue && (
+					<button type="button" data-testid="syllabus-continue" title={`Next: ${upNext.title}`} onClick={onContinue} disabled={starting} className={cn(ACTION, "mr-1")}>
+						{starting ? "Starting…" : "Continue course"}
+					</button>
+				)}
 				{!building && units.length > 0 && (
 					<button type="button" data-testid="syllabus-rebuild" onClick={onToggleRebuild} className={QUIET}>
 						{rebuilding ? "Cancel" : "Rebuild…"}
@@ -313,6 +355,11 @@ export function SyllabusBody({
 			) : (
 				rebuilding && notePanel("Replace the syllabus")
 			)}
+			{!building && allDone && (
+				<p data-testid="syllabus-done" className="mt-2 px-2 text-xs text-muted-foreground">
+					Every unit is covered or skipped.
+				</p>
+			)}
 			{!building && units.length > 0 && <div className="mt-2">{children}</div>}
 		</section>
 	);
@@ -329,6 +376,9 @@ export function CourseSyllabus({ course, onChanged }: { course: CourseRecord; on
 	const [note, setNote] = useState("");
 	const [renamingId, setRenamingId] = useState<string | null>(null);
 	const [draftTitle, setDraftTitle] = useState("");
+	const [starting, setStarting] = useState(false);
+	const router = useRouter();
+	const starterRef = useRef(new SessionStarter());
 
 	const refresh = useCallback(async () => {
 		try {
@@ -384,6 +434,26 @@ export function CourseSyllabus({ course, onChanged }: { course: CourseRecord; on
 	const editUnit = (unitId: string, edit: object) =>
 		void send(`/api/courses/${courseId}/syllabus`, { method: "PATCH", body: JSON.stringify({ unitId, ...edit }) }, setProblem, "Could not change the unit. Try again.");
 
+	const sessionOf = (unitId: string) => course.sessions.find((session) => session.unitIds.includes(unitId))?.chatId;
+	/** Open the unit's session, or create one scoped to it with the opening request ready to send. */
+	const startUnit = (unit: SyllabusUnit) => {
+		const existing = sessionOf(unit.id);
+		if (existing) {
+			router.push(`/chat/${existing}`);
+			return;
+		}
+		if (starting) return;
+		setStarting(true);
+		setError(null);
+		void starterRef.current
+			.start({ title: unitOpeningPrompt(unit), courseId, unitId: unit.id }, fetch)
+			.then((target) => router.push(target))
+			.catch(() => {
+				setStarting(false);
+				setError("Could not start the session. Try again.");
+			});
+	};
+
 	const inCourse = new Set(course.bookIds ?? []);
 	const books = (course.bookIds ?? []).map((id) => library?.find((book) => book.id === id)).filter((book): book is Book => book !== undefined);
 	const units = course.syllabus?.units ?? [];
@@ -412,6 +482,11 @@ export function CourseSyllabus({ course, onChanged }: { course: CourseRecord; on
 				note={note}
 				onNote={setNote}
 				onToggleRebuild={() => setRebuilding((v) => !v)}
+				starting={starting}
+				onContinue={() => {
+					const next = course.syllabus ? nextUnit(course.syllabus) : null;
+					if (next) startUnit(next);
+				}}
 				onBuild={() =>
 					void send(`/api/courses/${courseId}/syllabus`, { method: "POST", body: JSON.stringify({ note }) }, setProblem, "Could not start the build. Try again.").then((started) => {
 						if (!started) return;
@@ -445,6 +520,10 @@ export function CourseSyllabus({ course, onChanged }: { course: CourseRecord; on
 						onMove={(direction) => editUnit(unit.id, { op: "move", direction })}
 						onSkip={(skipped) => editUnit(unit.id, { op: "skip", skipped })}
 						onDelete={() => editUnit(unit.id, { op: "delete" })}
+						hasSession={sessionOf(unit.id) !== undefined}
+						starting={starting}
+						onStart={() => startUnit(unit)}
+						onCover={(covered) => editUnit(unit.id, { op: "cover", covered })}
 					/>
 				))}
 			</SyllabusBody>

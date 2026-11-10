@@ -16,7 +16,7 @@ import { randomBytes } from "node:crypto";
 import { emit } from "../core/events.ts";
 import type { CourseRecord, MaterialRecord } from "../core/contracts.ts";
 import { ModelsNotConfiguredError, ProviderKeyMissingError } from "../core/settings.ts";
-import { buildBlocker, cleanSyllabusNote, deleteUnit, moveUnit, renameUnit, setUnitSkipped, syllabusFromDraft, withoutBook } from "../core/syllabus.ts";
+import { buildBlocker, cleanSyllabusNote, deleteUnit, moveUnit, renameUnit, setUnitCovered, setUnitSkipped, syllabusFromDraft, withoutBook } from "../core/syllabus.ts";
 import { stores, type Stores } from "./stores.ts";
 import { createSyllabusBuilder, type SyllabusBuilder } from "./syllabus-builder.ts";
 
@@ -164,6 +164,15 @@ export function createSyllabusService(deps: SyllabusDeps) {
 		setUnitSkipped(courseId: string, unitId: string, skipped: unknown): SyllabusOutcome {
 			return edit(courseId, (course) => {
 				const next = course.syllabus ? setUnitSkipped(course.syllabus, unitId, skipped === true) : null;
+				return next ? { ...course, syllabus: next } : null;
+			});
+		},
+		/** Mark a unit covered or not covered — the tutor's tool and the
+		 *  learner's override both land here. */
+		setUnitCovered(courseId: string, unitId: string, covered: unknown): SyllabusOutcome {
+			return edit(courseId, (course) => {
+				const hasSession = course.sessions.some((session) => session.unitIds.includes(unitId));
+				const next = course.syllabus ? setUnitCovered(course.syllabus, unitId, covered === true, hasSession) : null;
 				return next ? { ...course, syllabus: next } : null;
 			});
 		},

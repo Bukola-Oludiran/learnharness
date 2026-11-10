@@ -57,4 +57,5 @@ export const artifactRenderers: Record<string, ComponentType<ArtifactPartProps>>
 	ingest_material: ToolCallCard,
 	material_status: ToolCallCard,
 	read_material: ToolCallCard,
+	mark_unit_covered: ToolCallCard,
 };

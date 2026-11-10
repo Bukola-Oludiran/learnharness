@@ -19,7 +19,7 @@ import { runSubmitAgent } from "../../agent/subagents/submit-agent.ts";
 import { invalidInputResult, toToolResult } from "../../agent/tool-execute.ts";
 import { healEncodedArguments } from "../../core/argument-heal.ts";
 import type { TestQuestion, TestReading } from "../../core/contracts.ts";
-import { cleanTestReading, TEST_LINKER_INSTRUCTIONS, TEST_READER_INSTRUCTIONS } from "../../core/evidence.ts";
+import { cleanTestReading, QUIZ_LINKER_INSTRUCTIONS, TEST_LINKER_INSTRUCTIONS, TEST_READER_INSTRUCTIONS } from "../../core/evidence.ts";
 import { resolveRoleSpec } from "../../core/settings-resolution.ts";
 import type { ModelRole } from "../../../config.ts";
 import { heifToJpeg, isHeif } from "../attachments.ts";
@@ -120,12 +120,25 @@ const submitLinksInput = Type.Object({
 });
 
 export function createTestLinker(cheapEngine: () => PiEngine = () => engineFor("extractor", "No background model is set up. Choose one in Settings, then retry.")): TestLinker {
-	return async (questions, ideas, signal) => {
+	return createQuestionLinker(TEST_LINKER_INSTRUCTIONS, true, "The test's questions could not be matched to ideas. Retry.", cheapEngine);
+}
+
+/** Lesson quiz questions → the ideas that lesson added to the graph
+ *  (phase 4c). Same submit-and-validate loop as the test linker; a quiz
+ *  question states no idea of its own. */
+export type QuizLinker = (questions: readonly { question: string }[], ideas: readonly LinkableIdea[], signal?: AbortSignal) => Promise<string[][]>;
+
+export function createQuizLinker(cheapEngine: () => PiEngine = () => engineFor("extractor", "No background model is set up.")): QuizLinker {
+	return createQuestionLinker(QUIZ_LINKER_INSTRUCTIONS, false, "The quiz questions could not be matched to ideas.", cheapEngine);
+}
+
+function createQuestionLinker(instructions: string, statesIdea: boolean, neverSubmitted: string, cheapEngine: () => PiEngine) {
+	return async (questions: readonly { question: string; idea?: string }[], ideas: readonly LinkableIdea[], signal?: AbortSignal): Promise<string[][]> => {
 		if (questions.length === 0 || ideas.length === 0) return questions.map(() => []);
 		const known = new Set(ideas.map((idea) => idea.id));
 		const prompt = [
 			"Questions:",
-			...questions.map((q, i) => `${i + 1}. ${q.question || "(no question text)"}\n   Tests: ${q.idea || "(not stated)"}`),
+			...questions.map((q, i) => `${i + 1}. ${q.question || "(no question text)"}${statesIdea ? `\n   Tests: ${q.idea || "(not stated)"}` : ""}`),
 			"",
 			"Ideas:",
 			...ideas.map((idea) => `[${idea.id}] ${idea.name}: ${idea.statement}`),
@@ -147,12 +160,12 @@ export function createTestLinker(cheapEngine: () => PiEngine = () => engineFor("
 					const invented = [...new Set(links.flat().filter((id) => !known.has(id)))];
 					return invented.length > 0 ? `unknown idea ids ${JSON.stringify(invented)} — use only ids from the Ideas list` : null;
 				},
-				systemPrompt: TEST_LINKER_INSTRUCTIONS,
+				systemPrompt: instructions,
 				prompt,
 				engine: cheapEngine(),
 				signal,
 				onStep: () => {},
-				neverSubmitted: "The test's questions could not be matched to ideas. Retry.",
+				neverSubmitted,
 			}),
 		);
 	};

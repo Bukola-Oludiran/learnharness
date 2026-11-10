@@ -15,6 +15,9 @@ import { subscribe } from "../core/events.ts";
 import { courseOfSession } from "../core/course.ts";
 import { byTime, ideaState, practiceEvidenceOf } from "../core/evidence.ts";
 import type { Evidence, EvidenceOutcome, EvidenceView, IdeaResult } from "../core/contracts.ts";
+import type { WeakIdea } from "../core/syllabus.ts";
+import { createQuizLinker } from "./ingest/test-reader.ts";
+import { createQuizEvidenceSync } from "./quiz-evidence.ts";
 import { stores } from "./stores.ts";
 
 interface LhEvidenceGlobal {
@@ -24,6 +27,9 @@ function syncState(): NonNullable<LhEvidenceGlobal["__lhEvidenceSync"]> {
 	const g = globalThis as typeof globalThis & LhEvidenceGlobal;
 	return (g.__lhEvidenceSync ??= { subscribed: false, backfilled: false });
 }
+
+/** Graded quiz answers → evidence on the lesson's ideas (quiz-evidence.ts). */
+export const syncQuizEvidence = createQuizEvidenceSync({ stores, link: createQuizLinker() });
 
 /** Fold one practice session's concluded problems into the ledger. */
 export function syncPracticeEvidence(chatId: string): number {
@@ -57,11 +63,18 @@ function ensureSubscribed(): void {
 	state.subscribed = true;
 	subscribe((event) => {
 		if (event.type !== "turn-settled") return;
+		const chatId = (event as { chatId: string }).chatId;
 		try {
-			syncPracticeEvidence((event as { chatId: string }).chatId);
+			syncPracticeEvidence(chatId);
 		} catch (error) {
 			console.error("[evidence] practice fold failed:", error);
 		}
+		// Quiz answers (phase 4c): matched to the lesson's ideas in the background.
+		void syncQuizEvidence(chatId).catch((error) => {
+			// No background model, or a provider failure: the answers stay
+			// unrecorded and the next settled turn tries again.
+			console.info(`[evidence] quiz match skipped for ${chatId}: ${error instanceof Error ? error.message : String(error)}`);
+		});
 	});
 }
 ensureSubscribed();
@@ -122,4 +135,25 @@ export function evidenceView(): EvidenceView {
 		}
 	}
 	return { states, results };
+}
+
+const MAX_WEAK_IDEAS = 8;
+
+/** The ideas with results from this course whose state is now missed or
+ *  shaky, most recent result first — the unit block's "recently got wrong"
+ *  line (phase 4c). */
+export function weakIdeasForCourse(courseId: string): WeakIdea[] {
+	const entries = stores.evidenceStore.read().sort(byTime);
+	const inCourse = new Set(entries.filter((entry) => entry.courseId === courseId).flatMap((entry) => entry.nodeIds));
+	if (inCourse.size === 0) return [];
+	const names = new Map(stores.graphStore.readNodes().map((node) => [node.id, node.name]));
+	const byNode = new Map<string, Evidence[]>();
+	for (const entry of entries) for (const nodeId of entry.nodeIds) if (inCourse.has(nodeId)) byNode.set(nodeId, [...(byNode.get(nodeId) ?? []), entry]);
+	const weak: (WeakIdea & { at: string })[] = [];
+	for (const [nodeId, own] of byNode) {
+		const name = names.get(nodeId);
+		const state = ideaState(own.map((entry) => entry.outcome), true);
+		if (name && (state === "missed" || state === "shaky")) weak.push({ name, state, at: own.at(-1)!.at });
+	}
+	return weak.sort((a, b) => b.at.localeCompare(a.at)).slice(0, MAX_WEAK_IDEAS).map(({ name, state }) => ({ name, state }));
 }

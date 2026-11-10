@@ -192,3 +192,64 @@ export const TEST_LINKER_INSTRUCTIONS = [
 	"For every question, return the ids of the listed ideas whose statements say what the question tests. Usually that is one idea. Use two or three only when the question needs each of them. Return no ids when none of the listed ideas fits. Never invent an id.",
 	"Call submit_links once with the result.",
 ].join("\n\n");
+
+/** One graded multiple-choice answer from a lesson. */
+export interface QuizResult {
+	toolCallId: string;
+	question: string;
+	outcome: EvidenceOutcome;
+	/** ISO time the learner answered. */
+	at: string;
+}
+
+/**
+ * The graded quiz answers a teaching session's record holds: teach-phase
+ * multiple-choice `quiz` calls with a stored verdict. "I don't know" is
+ * wrong. Left out: predictions (asked before the material is taught, so a
+ * wrong answer is expected), free-recall answers (graded in prose, no
+ * stored verdict), the opening probe, and dismissed questions.
+ */
+export function quizResultsOf(messages: readonly LhMessage[]): QuizResult[] {
+	const out: QuizResult[] = [];
+	for (const m of messages) {
+		if ((m as { role?: string }).role !== "toolResult") continue;
+		const result = m as ToolResultMessage;
+		if (result.toolName !== "quiz" || result.isError || result.details == null) continue;
+		const details = result.details as { kind?: unknown; questionType?: unknown; questionText?: unknown; dontKnow?: unknown; correct?: unknown; dismissed?: unknown; answeredAt?: unknown };
+		if (details.kind !== "quiz" || details.dismissed || details.questionType === "predict" || typeof details.questionText !== "string") continue;
+		const outcome: EvidenceOutcome | null = details.dontKnow === true ? "wrong" : details.correct === true ? "correct" : details.correct === false ? "wrong" : null;
+		if (!outcome) continue;
+		out.push({
+			toolCallId: result.toolCallId,
+			question: details.questionText.trim(),
+			outcome,
+			at: typeof details.answeredAt === "string" ? details.answeredAt : new Date(result.timestamp).toISOString(),
+		});
+	}
+	return out;
+}
+
+export const quizEvidenceId = (chatId: string, toolCallId: string) => `quiz:${chatId}:${toolCallId}`;
+
+/** One matched quiz result as a ledger line. */
+export function quizEvidenceOf(chatId: string, result: QuizResult, nodeIds: readonly string[], scope: { courseId?: string; unitId?: string } = {}): Evidence {
+	return {
+		id: quizEvidenceId(chatId, result.toolCallId),
+		at: result.at,
+		nodeIds: [...new Set(nodeIds)],
+		from: "quiz",
+		outcome: result.outcome,
+		summary: result.question.slice(0, 600),
+		chatId,
+		...(scope.courseId ? { courseId: scope.courseId } : {}),
+		...(scope.unitId ? { unitId: scope.unitId } : {}),
+	};
+}
+
+/** The quiz linker's instructions (wording approved by the owner, 2026-11-10). */
+export const QUIZ_LINKER_INSTRUCTIONS = [
+	"Match each quiz question to the ideas it tests.",
+	"You get questions asked during a lesson, and a list of ideas that lesson added to the learner's knowledge graph, each with an id.",
+	"For every question, return the ids of the listed ideas whose statements say what the question tests. Usually that is one idea. Use two or three only when the question needs each of them. Return no ids when none of the listed ideas fits. Never invent an id.",
+	"Call submit_links once with the result.",
+].join("\n\n");

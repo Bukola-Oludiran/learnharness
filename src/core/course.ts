@@ -61,7 +61,12 @@ export function withLiveSessions(course: CourseRecord, exists: (chatId: string) 
  * kind. A course with no goal contributes its title line only — the two
  * goal lines have nothing to refer to.
  */
-export function courseContextSegment(course: Pick<CourseRecord, "title" | "goal">, books: readonly { id: string; title: string }[] = []): string {
+export function courseContextSegment(
+	course: Pick<CourseRecord, "title" | "goal">,
+	books: readonly { id: string; title: string }[] = [],
+	/** The unit block (core/syllabus.ts unitContextBlock) for a session scoped to a unit. */
+	unitBlock?: string | null,
+): string {
 	// The books line (owner, 2026-11-10) rides between the goal and the
 	// closing rule; with no goal it follows the title line.
 	const bookLines = books.length > 0 ? [["Course books, readable with read_material:", ...books.map((book) => `- "${book.title}" (id ${book.id})`)].join("\n")] : [];
@@ -75,5 +80,6 @@ export function courseContextSegment(course: Pick<CourseRecord, "title" | "goal"
 					"Keep the session in service of that goal. The learner's request for this session still decides its topic.",
 				]
 			: []),
+		...(unitBlock ? [unitBlock] : []),
 	].join("\n\n");
 }
