@@ -72,12 +72,20 @@ export async function loadLearnerImage(rawPath: string, signal?: AbortSignal): P
 	signal?.throwIfAborted();
 	const absolute = await checkLearnerImage(rawPath);
 	const bytes = await readBounded(absolute, signal);
+	return { path: absolute, ...await snapshotImageBytes(bytes, absolute, signal) };
+}
+
+/** Fork (FORK.md): the same bounds, normalization and identity for bytes
+ *  that arrive without a path (an uploaded answer attachment). `label`
+ *  names the image in errors. */
+export async function snapshotImageBytes(bytes: Uint8Array, label: string, signal?: AbortSignal): Promise<ImageSnapshot & { snapshotId: string }> {
+	if (bytes.byteLength > MAX_LEARNER_IMAGE_BYTES) throw new Error("Image exceeds 25 MiB; provide a smaller image");
 	const mime = detectSupportedImageMimeType(bytes);
-	if (!mime) throw new Error(`Not a supported image: ${absolute}`);
+	if (!mime) throw new Error(`Not a supported image: ${label}`);
 	checkImageDimensions(bytes, mime);
 	const stored = await normalize(bytes, signal);
 	signal?.throwIfAborted();
 	if (stored.mimeType !== "image/png" && stored.mimeType !== "image/jpeg") throw new Error("Unexpected stored image format");
 	const snapshotId = createHash("sha256").update(Buffer.from(stored.data, "base64")).digest("hex");
-	return { path: absolute, snapshotId, mimeType: stored.mimeType, data: stored.data, width: stored.width, height: stored.height };
+	return { snapshotId, mimeType: stored.mimeType, data: stored.data, width: stored.width, height: stored.height };
 }

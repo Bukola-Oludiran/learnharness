@@ -468,6 +468,9 @@ export interface QuestionAnswerData {
 	committed?: string; // explain only (rendering): the model's committed answer
 	explanation?: string; // quiz only (rendering)
 	dismissed?: boolean;
+	/** Fork (FORK.md): photos of the learner's work — image snapshot ids in
+	 *  the session's pool. Absent when none. */
+	attachments?: string[];
 	answeredAt: string;
 }
 
@@ -490,6 +493,7 @@ export interface AnswerRequest {
 	thinking?: string; // the reasoning-on-the-question channel (was `note`)
 	readingThinking?: string; // the thinking-while-reading channel (check answers)
 	confidence?: number; // quiz only: 0-100 raw probability — 50 is a real coin flip, always sent (owner, 2026-10-01)
+	attachments?: string[]; // fork: image snapshot ids riding the answer
 }
 
 /** The confidence slider's snap stops (owner, 2026-10-01): raw probability
@@ -730,6 +734,7 @@ export function buildAnswer(qd: QuestionData, req: AnswerRequest, tool?: string)
 	}
 	if (req.other?.trim()) base.other = req.other.trim();
 	if (req.text?.trim()) base.text = req.text.trim();
+	if (req.attachments && req.attachments.length > 0) base.attachments = [...req.attachments];
 
 	if (qd.kind === "quiz") {
 		base.correctIndices = qd.correctIndices ?? [];
@@ -798,5 +803,8 @@ export function compactAnswerForModel(ad: QuestionAnswerData): Record<string, un
 	const thinking = ad.thinking ?? ad.note;
 	if (thinking) out.thinking = thinking;
 	if (ad.readingThinking) out.thinkingWhileReading = ad.readingThinking;
+	// Fork (FORK.md): the photos themselves follow this result as images;
+	// the count tells the model how many to expect.
+	if (Array.isArray(ad.attachments) && ad.attachments.length > 0) out.photos = ad.attachments.length;
 	return out;
 }

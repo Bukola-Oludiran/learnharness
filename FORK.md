@@ -43,18 +43,33 @@ Add one row per edit, in the same pull request that makes it.
 | `src/core/ports.ts` | `CourseStore` interface and its `CourseRecord` import. | Courses | 1 |
 | `src/core/events.ts` | `courses-changed` in `ServerEvents` and `SERVER_EVENT_TYPES`. | Courses | 1 |
 | `src/server/stores.ts` | Wires `courseStore` into `stores`. | Courses | 1 |
-| `src/server/index.ts` | Re-exports `courses.ts`. | Courses | 1 |
-| `src/agent/teacher-agent.ts` | `AgentBuildOptions.courseContext`, appended after the composed prompt in `baseAgentOptions`. | Course context | 1 |
-| `src/server/chat-handler.ts` | Imports `courseContextFor` and passes `courseContext` in `agentOpts`. | Course context | 1 |
+| `src/server/index.ts` | Re-exports `courses.ts` and `attachments.ts`. | Courses, photo answers | 1, 2 |
+| `src/core/index.ts` | Re-exports `attachments.ts`. | Photo answers | 2 |
+| `src/agent/teacher-agent.ts` | `AgentBuildOptions.extraSegments`, appended in order after the composed prompt in `baseAgentOptions`. | Course context, photo rule | 1, 2 |
+| `src/agent/teacher-agent.ts` | `AgentBuildOptions.imageSnapshots`, passed to `toLlmMessages` in `convertToLlm`. | Photo answers | 2 |
+| `src/server/chat-handler.ts` | Passes `extraSegments` (course context, photo rule) and `imageSnapshots` in `agentOpts`. | Course context, photo answers | 1, 2 |
+| `src/server/chat-handler.ts` | Calls `assertAttachmentsUploaded` before `inputAppends`. | Photo answers | 2 |
 | `app/api/chats/route.ts` | `POST` accepts `courseId`: 404 before the create when unknown, then adds the new session to the course. | Courses | 1 |
 | `components/start-session.ts` | `SessionCreation.courseId`. | Courses | 1 |
 | `components/new-session.tsx` | `courseId` parameter on `startDraftSession` and prop on `NewSession`. | Courses | 1 |
 | `app/chat/new/page.tsx` | Reads `?course=<id>` and passes it to `NewSession`. | Courses | 1 |
 | `components/sidebar.tsx` | Imports and renders `CoursesSection` above the session search row. | Courses | 1 |
+| `src/agent/tools/learner-image.ts` | `snapshotImageBytes` split out of `loadLearnerImage`, so uploaded bytes get the same processing as a file path. | Photo answers | 2 |
+| `src/core/question-core.ts` | `attachments` on `QuestionAnswerData` and `AnswerRequest`; `buildAnswer` copies it; `compactAnswerForModel` adds a `photos` count. | Photo answers | 2 |
+| `src/core/input-events.ts` | `attachments` on the `thinking` event (text may then be empty); answers' lists validated; `assertAttachmentsUploaded`. | Photo answers | 2 |
+| `src/core/native-messages.ts` | `newThinkingMessage` takes attachments; `toLlmMessages` takes an image pool and appends image blocks to markers and tool results. | Photo answers | 2 |
+| `components/session-core.ts` | The optimistic thinking marker carries the event's attachments. | Photo answers | 2 |
+| `components/question-dock.tsx` | `chatId` prop; attach button, tray and paste on written (text-mode) answers. | Photo answers | 2 |
+| `components/practice-dock.tsx` | `chatId` prop; attach button, tray and paste; `onSubmit` also passes attachment ids. | Photo answers | 2 |
+| `components/chat.tsx` | `DockOverlay` reads the chat id from context and passes it to both docks; `submitThinking` forwards attachment ids. | Photo answers | 2 |
+| `components/answered-card.tsx`, `components/practice-cards.tsx` | Render `AttachmentThumbs`; a photo-only thinking card drops its empty text block. | Photo answers | 2 |
 
 ## Known gaps
 
-- The compaction threshold estimates the system prompt from `composeInstructions` alone (`src/server/chat-handler.ts`), so it does not count the course-context segment. The segment is at most a few hundred tokens.
+- The compaction threshold estimates the system prompt from `composeInstructions` alone (`src/server/chat-handler.ts`), so it does not count the course-context segment or the photo rule. Together they are at most a few hundred tokens.
+- Answer photos are resolved from the image pool as it stood when the turn started.
+- Dropping a file on a dock keeps upstream's behavior (it inserts the file's path); photos are attached with the button or by pasting.
+- HEIC photos are converted with macOS `sips`; on other systems the upload is refused with a message.
 
 ## Local app
 

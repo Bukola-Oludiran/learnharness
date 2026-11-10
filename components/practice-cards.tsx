@@ -1,5 +1,6 @@
 "use client";
 
+import { AttachmentThumbs } from "@/components/attachment-thumbs"; // fork (FORK.md)
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
 import type { ArtifactPartProps } from "@/src/core";
@@ -53,6 +54,8 @@ export interface PracticeThinkingData {
 	/** Legacy records (pre 2026-10-05) carry the old two-lane flag; ignored. */
 	commit?: boolean;
 	text: string;
+	/** Fork (FORK.md): photos of the learner's work — image snapshot ids. */
+	attachments?: string[];
 }
 
 export function ProblemCard({ part }: ArtifactPartProps) {
@@ -294,5 +297,13 @@ export function ThinkingCard({ data }: { data: PracticeThinkingData }) {
 	// 50%-italic quote block on expand. Legacy records' commit flag is
 	// deliberately unread (one lane now). A TRANSCRIPT row (owner round,
 	// 2026-10-07): full-width band + rail, arriving expanded.
-	return <ThinkingBlock testId="thinking-card" label="YOUR THINKING" text={data.text} defaultOpen />;
+	// Fork (FORK.md): a photo-only submission has no text block to show.
+	return (
+		<>
+			{(data.text.trim() || !data.attachments?.length) && (
+				<ThinkingBlock testId="thinking-card" label="YOUR THINKING" text={data.text} defaultOpen />
+			)}
+			<AttachmentThumbs ids={data.attachments} className="my-2" />
+		</>
+	);
 }

@@ -8,6 +8,8 @@ import { joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { PathInput } from "@/components/path-input";
 import { cn } from "@/lib/utils";
+// Fork (FORK.md): photos of the learner's work ride the submission.
+import { AttachPhotoButton, AttachmentTray, attachmentsSettled, readyAttachmentIds, useAnswerAttachments } from "@/components/answer-attachments";
 
 /**
  * The practice dock (practice sessions, owner design 2026-10-04): an
@@ -38,8 +40,9 @@ export interface PracticeDockProps {
 	/** Collapse state, owned by the DockOverlay. */
 	expanded: boolean;
 	onExpand: () => void;
-	/** text — POST {type:"thinking"} (one lane; the register is read from the text). */
-	onSubmit: (text: string) => void;
+	/** text — POST {type:"thinking"} (one lane; the register is read from the text).
+	 *  Fork: `attachments` are the uploaded photos' snapshot ids. */
+	onSubmit: (text: string, attachments: string[]) => void;
 	/** Escape in the thinking field stops dictation (threaded from the page). */
 	onEscape?: () => void;
 	/** Compaction is running for this chat (owner round 14): the thinking
@@ -47,14 +50,19 @@ export interface PracticeDockProps {
 	 *  and say so in the hint row. The server registry is the real gate;
 	 *  this is the affordance. */
 	compactionRunning?: boolean;
+	/** Fork (FORK.md): the session photos upload to. Absent → attaching is hidden. */
+	chatId?: string;
 }
 
-export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmit, onEscape, compactionRunning = false }: PracticeDockProps) {
+export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmit, onEscape, compactionRunning = false, chatId }: PracticeDockProps) {
 	const [thinking, setThinking] = useState("");
 	// Ref MIRRORS the field ("nothing gets lost", the question-dock
 	// discipline): a submit resuming after `await finishDictation()` reads
 	// the tail, never a stale closure.
 	const thinkingRef = useRef("");
+	const attachments = useAnswerAttachments(chatId); // fork (FORK.md)
+	const photosSettled = attachmentsSettled(attachments.items);
+	const canSend = photosSettled && (thinking.trim().length > 0 || attachments.items.length > 0);
 
 	useDictationTarget(
 		useCallback(
@@ -71,10 +79,13 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 	const submit = () => {
 		if (compactionRunning) return;
 		const text = thinkingRef.current.trim();
-		if (text.length === 0) return;
+		// Fork: a photo may stand in for the text; an upload in flight or failed holds the send.
+		const photos = readyAttachmentIds(attachments.items);
+		if (!attachmentsSettled(attachments.items) || (text.length === 0 && photos.length === 0)) return;
 		thinkingRef.current = "";
 		setThinking("");
-		onSubmit(text);
+		attachments.clear();
+		onSubmit(text, photos);
 	};
 
 	/* ENTER SUBMITS FROM ANYWHERE (owner round 6, 2026-10-05): dictation
@@ -117,6 +128,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 			    Shift+Enter makes a newline — less to decide about. */}
 			<div
 				data-testid="practice-thinking-field"
+				onPasteCapture={chatId ? attachments.onPasteCapture : undefined}
 				className="m-1.5 rounded-[10px] border border-border/70 bg-background/60 transition-colors focus-within:border-primary/50"
 			>
 				<div className="px-2.5 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -153,16 +165,18 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 				    question dock's — hint left, the SAME Button (h-9, px-3.5),
 				    one p-1 row. Corner radii concentric: shell 16 − m-1.5 (6) =
 				    field 10 − p-1 (4) = button 6. */}
+				<AttachmentTray attachments={attachments} />
 				<div className="flex items-center justify-between gap-2 p-1">
 					<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
-						{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
+						{compactionRunning ? "compacting session…" : attachments.uploading ? "uploading photo…" : "↵ submits · ⇧↵ newline"}
 					</span>
+					{chatId && <AttachPhotoButton attachments={attachments} disabled={compactionRunning} />}
 					<Button
 						type="button"
 						data-testid="practice-send"
-						disabled={thinking.trim().length === 0 || compactionRunning}
+						disabled={!canSend || compactionRunning}
 						onClick={() => submit()}
-						className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
+						className={cn("h-9 rounded-[6px] px-3.5 text-sm font-medium", !chatId && "ml-auto")}
 					>
 						Submit thinking
 					</Button>

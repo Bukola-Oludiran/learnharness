@@ -44,6 +44,7 @@ import {
 	pendingProblemDismissalOf,
 } from "./native-messages.ts";
 import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
+import { missingAttachment, parseAttachmentIds, type ImagePool } from "./attachments.ts"; // fork (FORK.md)
 
 /** One client-originated input event (the POST body's `input`). */
 export type ChatInput =
@@ -57,8 +58,10 @@ export type ChatInput =
 	/** The practice dock's two buttons (owner, 2026-10-04): the learner's
 	 *  thinking on the ACTIVE problem — one lane (owner 2026-10-05):
 	 *  whether it claims an answer is read from the text. One
-	 *  problem may carry many submissions; each is its own turn. */
-	| { type: "thinking"; problemCallId: string; text: string }
+	 *  problem may carry many submissions; each is its own turn.
+	 *  Fork (FORK.md): `attachments` are image snapshot ids — photos of the
+	 *  learner's work; with at least one, the text may be empty. */
+	| { type: "thinking"; problemCallId: string; text: string; attachments?: string[] }
 	/** The practice move-on signal (owner round 16): the learner's
 	 *  explicit go-ahead during the between-problems pause — the Next
 	 *  chip or Enter on an empty composer. Practice sessions only, and
@@ -176,7 +179,7 @@ export function parseChatInput(input: unknown): ChatInput {
 			if (typeof i.answer !== "object" || i.answer === null) {
 				throw new ChatInputError("answer input requires the graded answer object");
 			}
-			return { type: "answer", toolCallId: i.toolCallId, answer: i.answer as QuestionAnswerData };
+			return { type: "answer", toolCallId: i.toolCallId, answer: withCleanAttachments(i.answer as QuestionAnswerData) };
 		case "continue":
 			return { type: "continue" };
 		case "retry":
@@ -191,15 +194,47 @@ export function parseChatInput(input: unknown): ChatInput {
 			if (typeof i.problemCallId !== "string" || i.problemCallId.length === 0) {
 				throw new ChatInputError("thinking input requires problemCallId");
 			}
-			if (typeof i.text !== "string" || i.text.trim().length === 0) {
-				throw new ChatInputError("thinking input requires non-empty text");
+			{
+				// Fork (FORK.md): photos may stand in for the text.
+				const attachments = cleanAttachments(i.attachments);
+				if (typeof i.text !== "string" || (i.text.trim().length === 0 && attachments.length === 0)) {
+					throw new ChatInputError("thinking input requires non-empty text");
+				}
+				return { type: "thinking", problemCallId: i.problemCallId, text: i.text, ...(attachments.length > 0 ? { attachments } : {}) };
 			}
-			return { type: "thinking", problemCallId: i.problemCallId, text: i.text };
 		case "next":
 			return { type: "next" };
 		default:
 			throw new ChatInputError(`unknown input type: ${String(i.type)}`);
 	}
+}
+
+/** Fork (FORK.md): a well-formed attachment list, or the honest 400. */
+function cleanAttachments(value: unknown): string[] {
+	const { ids, problem } = parseAttachmentIds(value);
+	if (problem) throw new ChatInputError(problem);
+	return ids;
+}
+
+/** Fork (FORK.md): the answer with its attachment list validated; the key
+ *  is dropped when empty so photo-less answers keep upstream's exact shape. */
+function withCleanAttachments(answer: QuestionAnswerData): QuestionAnswerData {
+	if (answer.attachments === undefined) return answer;
+	const { attachments: _raw, ...rest } = answer;
+	const ids = cleanAttachments(answer.attachments);
+	return ids.length > 0 ? { ...rest, attachments: ids } : rest;
+}
+
+/**
+ * Fork (FORK.md): SERVER-ONLY existence check, run by the turn handler
+ * before inputAppends — every attached id must be in the session's image
+ * pool. Kept out of inputAppends because the client runs that function for
+ * its optimistic appends and never holds the pool.
+ */
+export function assertAttachmentsUploaded(input: TurnInput, pool: ImagePool | undefined): void {
+	const ids = input.type === "answer" ? input.answer.attachments : input.type === "thinking" ? input.attachments : undefined;
+	const problem = ids && ids.length > 0 ? missingAttachment(ids, pool) : null;
+	if (problem) throw new ChatInputError(problem);
 }
 
 /**
@@ -238,7 +273,7 @@ export function inputAppends(
 			if (!active || active.toolCallId !== input.problemCallId) {
 				throw new ChatInputError("thinking input targets no active problem");
 			}
-			return [...dismissalConclusion(record), newThinkingMessage(input.problemCallId, input.text)];
+			return [...dismissalConclusion(record), newThinkingMessage(input.problemCallId, input.text, input.attachments)];
 		}
 		case "next": {
 			// Honest 400s, the thinking gate's discipline: the signal is a

@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { PathInput } from "@/components/path-input";
+// Fork (FORK.md): photos of the learner's work ride a written answer.
+import { AttachPhotoButton, AttachmentTray, attachmentsSettled, readyAttachmentIds, useAnswerAttachments } from "@/components/answer-attachments";
 import { MalformedQuestion } from "@/components/malformed-question";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
@@ -97,6 +99,8 @@ export interface QuestionDockProps {
 	 *  and say so in the hint row. The server registry is the real gate;
 	 *  this is the affordance. */
 	compactionRunning?: boolean;
+	/** Fork (FORK.md): the session photos upload to. Absent → attaching is hidden. */
+	chatId?: string;
 }
 
 export function QuestionDock({
@@ -113,6 +117,7 @@ export function QuestionDock({
 	phase = "probe",
 	dictationClaim = true,
 	compactionRunning = false,
+	chatId,
 }: QuestionDockProps) {
 	// The probe-phase names (owner, 2026-10-09) canonicalize onto their
 	// teach twins for every dock concern — parse dispatch, labels, kinds:
@@ -165,6 +170,7 @@ export function QuestionDock({
 					onEscape={onEscape}
 					dictationClaim={dictationClaim}
 					compactionRunning={compactionRunning}
+					chatId={chatId}
 				/>
 			</div>
 		</>
@@ -262,6 +268,7 @@ function QuestionDockForm({
 	onEscape,
 	dictationClaim = true,
 	compactionRunning = false,
+	chatId,
 }: Omit<QuestionDockProps, "expanded" | "onExpand" | "reveal">) {
 	const kind = toolQuestionKind(toolName);
 
@@ -368,9 +375,13 @@ function QuestionDockForm({
 
 	const toggle = (idx: number) => setSel(toggleOption(selectMode, sel, idx));
 
+	// Fork (FORK.md): written answers may carry photos — one can stand in for
+	// the text; an upload in flight or failed holds the submit.
+	const attachments = useAnswerAttachments(chatId);
+	const canAttach = qd.mode === "text" && chatId !== undefined;
 	const canSubmit =
 		qd.mode === "text"
-			? text.trim().length > 0
+			? attachmentsSettled(attachments.items) && (text.trim().length > 0 || attachments.items.length > 0)
 			: sel.dontKnow || (sel.otherSelected && other.trim().length > 0) || sel.selected.size > 0;
 
 	const submit = () => {
@@ -398,6 +409,7 @@ function QuestionDockForm({
 			// Always sent on quiz answers (owner: 50 must mean 50, never
 			// "untouched"); buildAnswer drops it on "I don't know".
 			confidence: kind === "quiz" ? CONFIDENCE_STOPS[confIdx] : undefined,
+			attachments: canAttach ? readyAttachmentIds(attachments.items) : undefined,
 		};
 		// Snapshot before optimistic submission unmounts the form. Ref values
 		// include the dictation finals that just landed, unlike stale closures.
@@ -844,6 +856,7 @@ function QuestionDockForm({
 			>
 				<div
 					data-testid={qd.mode === "text" ? "answer-field" : "thinking-field"}
+					onPasteCapture={canAttach ? attachments.onPasteCapture : undefined}
 					className="rounded-[10px] border border-border/70 bg-background/60 transition-colors focus-within:border-primary/50"
 				>
 					<div className="px-2.5 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -911,14 +924,16 @@ function QuestionDockForm({
 							)}
 						/>
 					)}
+					{canAttach && <AttachmentTray attachments={attachments} />}
 					<div className="flex items-center justify-between gap-2 p-1">
 						<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
-								{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
+								{compactionRunning ? "compacting session…" : attachments.uploading ? "uploading photo…" : "↵ submits · ⇧↵ newline"}
 						</span>
+						{canAttach && <AttachPhotoButton attachments={attachments} disabled={compactionRunning} />}
 						<Button
 							type="submit"
 							disabled={!canSubmit || compactionRunning}
-							className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
+							className={cn("h-9 rounded-[6px] px-3.5 text-sm font-medium", !canAttach && "ml-auto")}
 						>
 							Submit answer
 						</Button>

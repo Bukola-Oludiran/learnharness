@@ -46,6 +46,7 @@ import {
 import { compactAnswerForModel, type QuestionAnswerData } from "./question-core.ts";
 import { activeCompactionOf, keptIndexFor } from "./compaction.ts";
 import { parseQuestionInput } from "./tool-parts.ts";
+import { attachmentBlocks, photoOnlyText, type ImagePool } from "./attachments.ts"; // fork (FORK.md)
 
 /** The hard-invariant wording for an aborted turn's unanswered calls —
  *  carried over verbatim from the pre-native era so the model's view
@@ -313,14 +314,15 @@ export function newGraphContextMessage(picks: readonly GraphContextPick[], chain
  *  content label is the single "Your thinking"; `details` keeps the raw
  *  payload for the transcript card. One problem may carry many
  *  submissions. */
-export function newThinkingMessage(problemCallId: string, text: string): LhMarkerMessage {
+export function newThinkingMessage(problemCallId: string, text: string, attachments: readonly string[] = []): LhMarkerMessage {
 	return {
 		id: newMessageId(),
 		role: "custom",
 		customType: "practice-thinking",
-		content: `${THINKING_LABEL}:\n${text}`,
+		// Fork (FORK.md): a photo-only submission still reads as a sentence.
+		content: `${THINKING_LABEL}:\n${text.trim() || photoOnlyText(attachments.length)}`,
 		display: true,
-		details: { problemCallId, text },
+		details: { problemCallId, text, ...(attachments.length > 0 ? { attachments: [...attachments] } : {}) },
 		timestamp: Date.now(),
 	};
 }
@@ -580,7 +582,7 @@ function resultIdsFrom(messages: readonly AgentMessage[]): Set<string> {
  * Contract (pi-agent-core): never throws — an unknown shape passes
  * through untouched rather than killing the loop.
  */
-export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
+export function toLlmMessages(messages: readonly AgentMessage[], images?: ImagePool): Message[] {
 	// THE COMPACTION CUT (owner round 14, 2026-10-05): the ACTIVE marker
 	// (the newest — chained compactions rule last) names the first kept
 	// message; everything before it is replaced by the marker's content
@@ -633,14 +635,19 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			if (marker.customType === "compaction" && head !== null) continue;
 			out.push({
 				role: "user",
-				content: [{ type: "text", text: marker.content }],
+				// Fork (FORK.md): the marker's photos join here, at the wire.
+				content: [{ type: "text", text: marker.content }, ...attachmentBlocks(marker, images)],
 			timestamp: marker.timestamp,
 			});
 			continue;
 		}
 		// Strip app-only id/CLI context metadata: the wire carries the native shape only.
 		const { id: _id, cliContextWindow: _cliContextWindow, ...native } = m as LhMessage;
-		out.push(native as Message);
+		// Fork (FORK.md): an answer's photos follow its text, at the wire only.
+		const photos = role === "toolResult" ? attachmentBlocks(m, images) : [];
+		out.push((photos.length > 0
+			? { ...native, content: [...(native as ToolResultMessage).content, ...photos] }
+			: native) as Message);
 		// Repair unanswered calls from completed generations, not calls in
 		// failed generations. Pi filters error/aborted assistants itself;
 		// adding results for their unexecuted calls would leave orphans.
