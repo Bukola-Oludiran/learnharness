@@ -11,6 +11,7 @@ export * from "./courses.ts"; // fork: courses (FORK.md)
 export * from "./attachments.ts"; // fork: answer attachments (FORK.md)
 export * from "./materials.ts"; // fork: materials (FORK.md)
 export * from "./syllabus.ts"; // fork: syllabus (FORK.md)
+export * from "./canvases.ts"; // fork: canvas (FORK.md)
 export * from "./evidence.ts"; // fork: learner evidence (FORK.md)
 export * from "./graph.ts";
 export * from "./source-organization.ts";

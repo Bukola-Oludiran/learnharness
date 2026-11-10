@@ -9,6 +9,7 @@
 import { chatStore } from "../store/chats.ts";
 import { courseStore } from "../store/courses.ts";
 import { materialStore } from "../store/materials.ts";
+import { canvasStore } from "../store/canvases.ts";
 import { evidenceStore } from "../store/evidence.ts";
 import { graphStore } from "../store/graph.ts";
 import { sourceOrganizationStore } from "../store/source-organization.ts";
@@ -21,6 +22,7 @@ export const stores = {
 	chatStore,
 	courseStore,
 	materialStore,
+	canvasStore,
 	evidenceStore,
 	graphStore,
 	sourceOrganizationStore,

@@ -34,6 +34,7 @@ import { collectToolCallIds } from "./pi/call-ids.ts";
 import { providerEventNote } from "../agent/provider-events.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 import { courseContextFor } from "./courses.ts";
+import { answerImagePool } from "./canvases.ts"; // fork: canvas outlines (FORK.md)
 import { materialToolsFor } from "./material-tools.ts"; // fork: the tutor's material tools (FORK.md)
 import { hasPhotoAnswers, PHOTO_ANSWER_RULE } from "../core/attachments.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
@@ -470,7 +471,7 @@ export async function handleChatInput(
 		// photo rule, present only once the session holds a photo answer.
 		extraSegments: [courseContextFor(chatId), hasPhotoAnswers(agentMessages) ? PHOTO_ANSWER_RULE : undefined]
 			.filter((segment): segment is string => segment !== undefined),
-		imageSnapshots: record.imageSnapshots,
+		imageSnapshots: answerImagePool(chatId, record.imageSnapshots),
 		extraTools: materialToolsFor(chatId),
 	};
 	// PRACTICE BRANCH (owner design, 2026-10-04): a kind:"practice"

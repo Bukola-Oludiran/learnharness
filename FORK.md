@@ -38,11 +38,13 @@ Add one row per edit, in the same pull request that makes it.
 
 | Upstream file | Change | For | Phase |
 | --- | --- | --- | --- |
-| `config.ts` | `PATHS.courses`, `PATHS.materials` and `EVIDENCE_FILE`. | Courses, materials, evidence | 1, 3a, 3b |
+| `config.ts` | `PATHS.courses`, `PATHS.materials`, `PATHS.canvases` and `EVIDENCE_FILE`. | Courses, materials, evidence, canvas | 1, 3a, 3b, 5a |
+| `package.json`, `package-lock.json` | Dependency `@excalidraw/excalidraw`; `predev` and `prebuild` run `scripts/copy-excalidraw-assets.mjs`. | Canvas | 5a |
+| `.gitignore` | Ignores `public/excalidraw/` (the copied fonts). | Canvas | 5a |
 | `src/core/contracts.ts` | Re-exports `contracts/course.ts`, `contracts/material.ts` and `contracts/evidence.ts`. | Courses, materials, evidence | 1, 3a, 3b |
-| `src/core/ports.ts` | `CourseStore`, `MaterialStore` and `EvidenceStore` interfaces and their record imports. | Courses, materials, evidence | 1, 3a, 3b |
+| `src/core/ports.ts` | `CourseStore`, `MaterialStore`, `EvidenceStore` and `CanvasStore` interfaces and their record imports. | Courses, materials, evidence, canvas | 1, 3a, 3b, 5a |
 | `src/core/events.ts` | `courses-changed`, `materials-changed` and `evidence-changed` in `ServerEvents` and `SERVER_EVENT_TYPES`. | Courses, materials, evidence | 1, 3a, 3b |
-| `src/server/stores.ts` | Wires `courseStore`, `materialStore` and `evidenceStore` into `stores`. | Courses, materials, evidence | 1, 3a, 3b |
+| `src/server/stores.ts` | Wires `courseStore`, `materialStore`, `evidenceStore` and `canvasStore` into `stores`. | Courses, materials, evidence, canvas | 1, 3a, 3b, 5a |
 | `src/server/index.ts` | Re-exports `courses.ts`, `attachments.ts`, `materials.ts` and `evidence.ts`. | Courses, photo answers, materials, evidence | 1, 2, 3a, 3b |
 | `src/core/index.ts` | Re-exports `attachments.ts`, `material.ts` and `evidence.ts`. | Photo answers, materials, evidence | 2, 3a, 3b |
 | `components/graph-canvas.ts` | `CanvasNode.tint`; tinted nodes are built into one cached path per colour and filled after the default nodes. | Evidence states | 3b |
@@ -51,6 +53,7 @@ Add one row per edit, in the same pull request that makes it.
 | `src/agent/teacher-agent.ts` | `AgentBuildOptions.imageSnapshots`, passed to `toLlmMessages` in `convertToLlm`. | Photo answers | 2 |
 | `src/server/chat-handler.ts` | Passes `extraSegments` (course context, photo rule) and `imageSnapshots` in `agentOpts`. | Course context, photo answers | 1, 2 |
 | `src/server/chat-handler.ts` | Calls `assertAttachmentsUploaded` before `inputAppends`. | Photo answers | 2 |
+| `src/server/chat-handler.ts` | `imageSnapshots` is passed through `answerImagePool`, which joins canvas outlines onto the session's images. | Canvas | 5a |
 | `src/agent/teacher-agent.ts` | `AgentBuildOptions.extraTools`, healed and appended to the teacher's registry in `createTeacherAgent` (ignored when `tools` is given). | Tutor material tools | 3c |
 | `src/server/chat-handler.ts` | Imports `material-tools.ts`; passes `extraTools: materialToolsFor(chatId)` in `agentOpts`. | Tutor material tools | 3c |
 | `components/artifacts/index.ts` | Registers `ToolCallCard` for `ingest_material`, `material_status`, `read_material` and `mark_unit_covered`. | Tutor tools | 3c, 4a, 4c |
@@ -105,6 +108,10 @@ Add one row per edit, in the same pull request that makes it.
 - "Covered" is the tutor's `mark_unit_covered` call or the learner's toggle; nothing infers it from the transcript. Deleting a unit's session leaves the unit in progress.
 - Quiz evidence counts teach-phase multiple-choice answers only: not predictions, free-recall answers (no stored verdict) or the opening probe. An answer is recorded only once it matches an idea the session has put in the graph; until then it is retried after later turns. The match is one cheap-model call per settled turn that has something new to match, and is skipped (and retried) when no background model is set.
 - Idea states still do not steer probing or practice targets; the unit block only lists the course's recently missed or shaky ideas.
+- A canvas drawing is an ordinary answer attachment (its PNG in the session image pool) plus a scene and an outline in `canvases/<chatId>/`, keyed by the PNG's snapshot id. Deleting a session leaves that folder on disk.
+- The docks gained no edit for the canvas: the Draw button is rendered by the fork's `AttachPhotoButton`. The editor is loaded lazily and is not covered by the node tests; it was smoke-tested in headless Chrome.
+- The canvas claims every keydown at the document while open, so app shortcuts do not fire under it. Its fonts are copied to `public/excalidraw/fonts` before dev and build; the CJK face (Xiaolai) is left out. Excalidraw's own "Library" button still fetches from the web.
+- The tutor cannot ask for a drawing through the question tools (no answer-form hint); it asks in prose.
 - Vision transcription usage is not written to any usage log (upstream's notes pipeline logs its own extraction usage on the source record).
 
 ## Local app

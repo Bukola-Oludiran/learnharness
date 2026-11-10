@@ -29,6 +29,8 @@ export const PATHS = {
 	courses: path.join(DATA_ROOT, "courses"),
 	/** Uploaded materials, one folder per material (fork — see FORK.md). */
 	materials: path.join(DATA_ROOT, "materials"),
+	/** Canvas drawings, one folder per session (fork — see FORK.md). */
+	canvases: path.join(DATA_ROOT, "canvases"),
 	graph: path.join(DATA_ROOT, "graph"),
 	/** Debug artifacts (env-gated): data/debug/provider-events/<chatId>.jsonl
 	 * raw provider stream recordings (src/agent/provider-events.ts). */

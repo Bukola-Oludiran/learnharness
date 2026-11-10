@@ -19,3 +19,6 @@ xai-credentials.json*
 
 # dev-fresh launcher scratch (fresh-user sim): disposable per launch
 .fresh-data/
+
+# fork: the canvas fonts, copied from node_modules before dev/build (scripts/copy-excalidraw-assets.mjs)
+public/excalidraw/
