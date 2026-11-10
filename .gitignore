@@ -22,3 +22,4 @@ xai-credentials.json*
 
 # fork: the canvas fonts, copied from node_modules before dev/build (scripts/copy-excalidraw-assets.mjs)
 public/excalidraw/
+public/mathlive/

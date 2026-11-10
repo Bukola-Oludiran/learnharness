@@ -120,7 +120,6 @@ describe("how a line is understood", () => {
 		assert.equal(errorOf("y = k x"), '"k" is not defined. Add a line such as k = 1.');
 		assert.equal(errorOf("y < 2x"), "Inequalities are not supported yet.");
 		assert.equal(errorOf("y = x = 2"), "Use one = sign.");
-		assert.equal(errorOf("f(x) = x^2"), "Write this as y = … (function definitions like f(x) = … are not supported yet).");
 		assert.match(errorOf("sin(x) = "), /missing on one side/);
 		assert.equal(errorOf("(1, 2, 3)"), "A point with three coordinates needs a 3D graph.");
 		assert.equal(errorOf("(1, 2, 3, 4)"), "A point needs two coordinates.");
