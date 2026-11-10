@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { PlusIcon } from "lucide-react";
+import { LibraryIcon, PlusIcon } from "lucide-react";
 import { CourseFormDialog } from "@/components/course-dialogs";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import { cn } from "@/lib/utils";
@@ -80,6 +80,19 @@ export function CoursesSection({ open }: { open: boolean }) {
 
 	return (
 		<div className="mb-3" data-testid="courses-section">
+			{/* The library (phase 3b2): every uploaded material, in or out of a course. */}
+			<Link
+				href="/library"
+				data-testid="library-link"
+				aria-current={pathname === "/library" ? "page" : undefined}
+				className={cn(
+					"mx-3 mb-2 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+					pathname === "/library" && "bg-accent text-foreground",
+				)}
+			>
+				<LibraryIcon className="size-3" />
+				Library
+			</Link>
 			<div className="mx-3 mb-1 flex items-center justify-between">
 				<span className="text-xs uppercase tracking-widest text-muted-foreground/70">Courses</span>
 				<button

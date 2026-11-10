@@ -3,7 +3,7 @@
  * the graph source path, and transcript assembly. No IO.
  */
 
-import type { MaterialFormat } from "./contracts/material.ts";
+import { MAX_MATERIAL_BYTES, type MaterialFormat } from "./contracts/material.ts";
 
 const startsWith = (bytes: Uint8Array, magic: readonly number[], at = 0) => magic.every((b, i) => bytes[at + i] === b);
 const ascii = (bytes: Uint8Array, from: number, length: number) => String.fromCharCode(...bytes.subarray(from, from + length));
@@ -26,6 +26,9 @@ function isImageBytes(bytes: Uint8Array): boolean {
 	);
 }
 
+const OLD_OFFICE_REFUSAL = "Old Office files (.ppt, .doc) are not supported. Open it in PowerPoint, Word, Keynote or Pages and export it as .pptx, .docx or PDF.";
+const UNSUPPORTED_REFUSAL = "This file type is not supported. Upload a PowerPoint (.pptx), Word (.docx), PDF, photo or text file.";
+
 export type FormatVerdict = { format: MaterialFormat } | { refused: string };
 
 /**
@@ -39,17 +42,18 @@ export function detectMaterialFormat(fileName: string, bytes: Uint8Array): Forma
 	if (startsWith(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d])) return { format: "pdf" };
 	if (isImageBytes(bytes)) return { format: "image" };
 	if (startsWith(bytes, [0xd0, 0xcf, 0x11, 0xe0])) {
-		return { refused: "Old Office files (.ppt, .doc) are not supported. Open it in Keynote or PowerPoint and export it as .pptx or PDF." };
+		return { refused: OLD_OFFICE_REFUSAL };
 	}
 	if (startsWith(bytes, [0x50, 0x4b, 0x03, 0x04])) {
 		if (ext === "pptx") return { format: "pptx" };
+		if (ext === "docx") return { format: "docx" };
 		if (ext === "epub") return { refused: "Books (EPUB) are not supported yet." };
-		return { refused: "This file type is not supported. Upload a PowerPoint (.pptx), PDF, photo or text file." };
+		return { refused: UNSUPPORTED_REFUSAL };
 	}
 	if (["md", "markdown", "txt"].includes(ext)) {
 		return bytes.includes(0) ? { refused: "This does not look like a text file." } : { format: "text" };
 	}
-	return { refused: "This file type is not supported. Upload a PowerPoint (.pptx), PDF, photo or text file." };
+	return { refused: UNSUPPORTED_REFUSAL };
 }
 
 /** One path segment safe for the graph's source paths (no separators,
@@ -64,6 +68,49 @@ function pathSegment(value: string, fallback: string): string {
  *  a folder named after the course. */
 export function materialSourcePath(courseTitle: string, fileName: string): string {
 	return `${pathSegment(courseTitle, "Course")}/${pathSegment(fileName, "material")}`;
+}
+
+const MAX_SOURCE_FOLDERS = 8;
+
+/** The graph source path for a library upload: the file's own folder path
+ *  when it came from a folder upload (`Stats 201/Week 2.pdf`), otherwise
+ *  the bare file name, which the source browser files at its root. */
+export function librarySourcePath(relativePath: string | null | undefined, fileName: string): string {
+	const segments = (relativePath ?? "").split(/[\\/]/).map((segment) => pathSegment(segment, "")).filter(Boolean);
+	// The last segment of a relative path is the file itself.
+	return [...segments.slice(0, -1).slice(-MAX_SOURCE_FOLDERS), pathSegment(fileName, "material")].join("/");
+}
+
+const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif"];
+const NOTES_EXTENSIONS = ["pptx", "docx", "pdf", "md", "markdown", "txt", ...IMAGE_EXTENSIONS];
+/** A file name that says "this is a test paper" (words approved by the owner, 2026-11-10). */
+const TEST_NAME = /(^|[^a-z])(tests?|exams?|quiz|quizzes|midterms?|finals?|papers?|marked)([^a-z]|$)/i;
+
+export type FolderChoice = "notes" | "test" | "skip";
+
+export interface FolderFileVerdict {
+	/** The pre-selected choice; the learner can change it. */
+	choice: FolderChoice;
+	/** Whether "Marked test" can be chosen (photos and PDFs only). */
+	testable: boolean;
+	/** Set when the file cannot be uploaded at all; it is listed greyed out. */
+	refused?: string;
+}
+
+/**
+ * The folder checklist's verdict on one file, from its name and size alone
+ * — nothing has been read yet. The server still checks the bytes at upload.
+ */
+export function folderFileVerdict(fileName: string, size: number): FolderFileVerdict {
+	const ext = /\.([A-Za-z0-9]+)$/.exec(fileName)?.[1]?.toLowerCase() ?? "";
+	const refuse = (refused: string): FolderFileVerdict => ({ choice: "skip", testable: false, refused });
+	if (fileName.startsWith(".") || fileName.startsWith("~$")) return refuse("Hidden or temporary file.");
+	if (ext === "ppt" || ext === "doc") return refuse("Old Office file. Export it as .pptx, .docx or PDF.");
+	if (!NOTES_EXTENSIONS.includes(ext)) return refuse("Not a supported file type.");
+	if (size === 0) return refuse("The file is empty.");
+	if (size > MAX_MATERIAL_BYTES) return refuse("Too big. Max 25 MB.");
+	const testable = ext === "pdf" || IMAGE_EXTENSIONS.includes(ext);
+	return { choice: testable && TEST_NAME.test(materialTitle(fileName)) ? "test" : "notes", testable };
 }
 
 /** The display title: the file name without its extension. */

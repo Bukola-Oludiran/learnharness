@@ -148,7 +148,7 @@ export function testIdeasText(title: string, reading: TestReading): string {
 }
 
 /** The evidence lines an approved, linked reading yields: one per MARKED question. */
-export function testEvidenceOf(material: { id: string; courseId: string }, reading: TestReading, at: string): Evidence[] {
+export function testEvidenceOf(material: { id: string; courseId?: string }, reading: TestReading, at: string): Evidence[] {
 	const out: Evidence[] = [];
 	for (const [index, q] of reading.questions.entries()) {
 		if (q.outcome === "unmarked") continue;
@@ -161,7 +161,7 @@ export function testEvidenceOf(material: { id: string; courseId: string }, readi
 			outcome: q.outcome,
 			summary: [`Q${q.number}${marks}: ${q.question}`, q.outcome === "correct" ? "" : (q.whatWentWrong ?? "")].filter(Boolean).join(" — ").slice(0, 600),
 			materialId: material.id,
-			courseId: material.courseId,
+			...(material.courseId ? { courseId: material.courseId } : {}),
 		});
 	}
 	return out;

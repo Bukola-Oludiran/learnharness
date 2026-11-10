@@ -11,7 +11,7 @@ export const MATERIAL_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 export const MAX_MATERIAL_BYTES = 25 * 1024 * 1024;
 
 export type MaterialKind = "book" | "notes" | "test";
-export type MaterialFormat = "pdf" | "pptx" | "epub" | "text" | "image";
+export type MaterialFormat = "pdf" | "pptx" | "docx" | "epub" | "text" | "image";
 /**
  * processing — converting to text, or extracting into the graph (`stage`)
  * review     — a vision model read part of it; waiting for the learner
@@ -34,23 +34,25 @@ export interface MaterialRecord {
 	title: string;
 	kind: MaterialKind;
 	format: MaterialFormat;
-	/** The course it was uploaded to. */
-	courseId: string;
+	/** The course it was uploaded to; absent for a library upload, which
+	 *  belongs to no course. */
+	courseId?: string;
 	/** The original file's name, as uploaded. */
 	fileName: string;
 	/** Empty until the books phase splits material into sections. */
 	sections: MaterialSection[];
 	status: MaterialStatus;
-	/** While processing: which half is running. */
-	stage?: "converting" | "extracting";
+	/** While processing: waiting for a free slot, or which half is running. */
+	stage?: "queued" | "converting" | "extracting";
 	/** How many parts a vision model had to read (photos, scanned pages,
 	 *  slide pictures). Above zero, the transcript waits for review. */
 	aiReadParts: number;
 	/** A caveat shown beside the material (skipped pictures, capped decks). */
 	notice?: string;
 	error?: string;
-	/** The graph source path — `<course>/<file>`, fixed at upload so a later
-	 *  course rename never changes the source's identity. */
+	/** The graph source path — `<course>/<file>`, or a library upload's own
+	 *  folder path — fixed at upload so a later rename never changes the
+	 *  source's identity. */
 	sourcePath: string;
 	/** Set once the notes are extracted into the graph. */
 	graphSourceId?: string;
@@ -73,6 +75,10 @@ export interface MaterialView extends MaterialRecord {
 	interrupted: boolean;
 }
 
-export const MATERIAL_ACCEPT = ".pptx,.pdf,.md,.markdown,.txt,.jpg,.jpeg,.png,.gif,.webp,.bmp,.heic,.heif";
+export const MATERIAL_ACCEPT = ".pptx,.docx,.pdf,.md,.markdown,.txt,.jpg,.jpeg,.png,.gif,.webp,.bmp,.heic,.heif";
 /** A marked test is photographed pages or one scanned PDF. */
 export const TEST_ACCEPT = ".pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.heic,.heif";
+/** Materials converting or extracting at once; the rest wait as `queued`. */
+export const MATERIAL_CONCURRENCY = 2;
+/** The most files one folder upload lists. */
+export const MAX_FOLDER_FILES = 1000;

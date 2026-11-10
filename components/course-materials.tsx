@@ -7,12 +7,14 @@ import { useBackdropDismiss } from "@/components/backdrop-dismiss";
 import { BrailleSpinner } from "@/components/braille-spinner";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import { cn } from "@/lib/utils";
+import { FolderUpload } from "@/components/folder-upload";
 import { TestReviewBody } from "@/components/test-review";
 import { AI_READ_MARK, MATERIAL_ACCEPT, TEST_ACCEPT, type MaterialView, type TestReading } from "@/src/core";
 
 /**
- * A course's materials (fork, phase 3a — see FORK.md): upload notes
- * (PowerPoint, PDF, photos, text), watch them convert, review anything a
+ * The materials panel (fork, phases 3a–3b2 — see FORK.md), for one course
+ * or — with no course — the whole library: upload notes (PowerPoint, Word,
+ * PDF, photos, text), marked tests or a folder of both, watch them convert, review anything a
  * vision model had to read, and see them land in the knowledge graph.
  * The server owns every state; this view fetches on `materials-changed`.
  */
@@ -21,13 +23,14 @@ const SECTION = "text-xs uppercase tracking-widest text-muted-foreground/70";
 const QUIET = "rounded-sm px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40";
 const ACTION = "rounded-sm border border-border px-2 py-1 text-xs text-foreground transition-colors hover:bg-accent disabled:opacity-40";
 
-const FORMAT_LABEL: Record<MaterialView["format"], string> = { pptx: "Slides", pdf: "PDF", image: "Photo", text: "Text", epub: "Book" };
+const FORMAT_LABEL: Record<MaterialView["format"], string> = { pptx: "Slides", docx: "Document", pdf: "PDF", image: "Photo", text: "Text", epub: "Book" };
 
 /** The row's one-line state. Pure — exported for tests. */
 export function materialStatus(material: MaterialView): { label: string; busy: boolean; tone: "quiet" | "attention" | "problem" } {
 	if (material.interrupted) return { label: "Interrupted", busy: false, tone: "problem" };
 	switch (material.status) {
 		case "processing":
+			if (material.stage === "queued") return { label: "Waiting…", busy: false, tone: "quiet" };
 			if (material.kind === "test") return { label: material.stage === "extracting" ? "Recording results…" : "Reading the paper…", busy: true, tone: "quiet" };
 			return { label: material.stage === "extracting" ? "Adding to graph…" : "Converting…", busy: true, tone: "quiet" };
 		case "review":
@@ -47,6 +50,7 @@ export function materialStatus(material: MaterialView): { label: string; busy: b
 /** One material row. Pure — exported for render tests. */
 export function MaterialRow({
 	material,
+	where,
 	confirmingDelete = false,
 	onReview,
 	onResults,
@@ -56,6 +60,8 @@ export function MaterialRow({
 	onDelete,
 }: {
 	material: MaterialView;
+	/** The library's extra context: the folder the file came from. */
+	where?: string;
 	confirmingDelete?: boolean;
 	onReview: () => void;
 	/** Open an approved test's results. */
@@ -74,7 +80,8 @@ export function MaterialRow({
 				<span className="min-w-0 flex-1">
 					<span className="block truncate font-prose text-(length:--lh-prose-size)">{material.title}</span>
 					<span className="block text-xs text-muted-foreground">
-						{material.kind === "test" ? "Marked test" : FORMAT_LABEL[material.format]} ·{" "}
+						{material.kind === "test" ? "Marked test" : FORMAT_LABEL[material.format]}
+						{where ? ` · ${where}` : ""} ·{" "}
 						<span
 							data-testid="material-status"
 							className={cn(status.tone === "attention" && "text-foreground", status.tone === "problem" && "text-destructive")}
@@ -316,7 +323,19 @@ function MaterialReviewDialog({ material, onClose }: { material: MaterialView | 
 	);
 }
 
+/** The folder a library material was filed under (its source path minus the file). */
+export function materialFolder(material: Pick<MaterialView, "sourcePath">): string | undefined {
+	const at = material.sourcePath.lastIndexOf("/");
+	return at > 0 ? material.sourcePath.slice(0, at) : undefined;
+}
+
 export function CourseMaterials({ courseId }: { courseId: string }) {
+	return <MaterialsPanel courseId={courseId} />;
+}
+
+/** `courseId` absent = the library: every material, plus folder upload. */
+export function MaterialsPanel({ courseId }: { courseId?: string }) {
+	const scope = courseId ? `courseId=${encodeURIComponent(courseId)}&` : "";
 	const [materials, setMaterials] = useState<MaterialView[] | null>(null);
 	const [problems, setProblems] = useState<string[]>([]);
 	const [uploading, setUploading] = useState(0);
@@ -326,12 +345,12 @@ export function CourseMaterials({ courseId }: { courseId: string }) {
 
 	const refresh = useCallback(async () => {
 		try {
-			const res = await fetch(`/api/materials?courseId=${encodeURIComponent(courseId)}`, { cache: "no-store" });
+			const res = await fetch(`/api/materials?${scope}`, { cache: "no-store" });
 			if (res.ok) setMaterials(((await res.json()) as { materials: MaterialView[] }).materials);
 		} catch {
 			setMaterials((prev) => prev ?? []); // a transient failure keeps the last snapshot
 		}
-	}, [courseId]);
+	}, [scope]);
 
 	const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 	const scheduleRefresh = () => {
@@ -357,7 +376,7 @@ export function CourseMaterials({ courseId }: { courseId: string }) {
 		// One at a time: each upload is a whole file in memory on both ends.
 		for (const file of list) {
 			try {
-				const res = await fetch(`/api/materials?courseId=${encodeURIComponent(courseId)}&name=${encodeURIComponent(file.name)}`, {
+				const res = await fetch(`/api/materials?${scope}name=${encodeURIComponent(file.name)}`, {
 					method: "POST",
 					headers: { "Content-Type": "application/octet-stream" },
 					body: file,
@@ -392,7 +411,7 @@ export function CourseMaterials({ courseId }: { courseId: string }) {
 		setProblems([]);
 		setUploading((n) => n + 1);
 		try {
-			const res = await fetch(`/api/materials?kind=test&courseId=${encodeURIComponent(courseId)}`, { method: "POST", body: form });
+			const res = await fetch(`/api/materials?${scope}kind=test`, { method: "POST", body: form });
 			if (!res.ok) {
 				const body = (await res.json().catch(() => ({}))) as { error?: string };
 				setProblems([body.error ?? `Upload failed (${res.status}).`]);
@@ -404,6 +423,8 @@ export function CourseMaterials({ courseId }: { courseId: string }) {
 		}
 		void refresh();
 	};
+
+	const stuck = materials?.filter((m) => m.status === "failed" || m.interrupted).length ?? 0;
 
 	return (
 		<section className="mt-8" data-testid="course-materials">
@@ -434,6 +455,20 @@ export function CourseMaterials({ courseId }: { courseId: string }) {
 					}}
 				/>
 				<span className="flex-1" />
+				{stuck > 1 && (
+					<button type="button" data-testid="material-retry-all" onClick={() => act("/api/materials/retry", "POST")} className={QUIET}>
+						Retry all failed
+					</button>
+				)}
+				{!courseId && (
+					<FolderUpload
+						disabled={uploading > 0}
+						onDone={(refused) => {
+							setProblems(refused);
+							void refresh();
+						}}
+					/>
+				)}
 				<button
 					type="button"
 					data-testid="test-upload"
@@ -468,14 +503,16 @@ export function CourseMaterials({ courseId }: { courseId: string }) {
 					<div className="px-2 py-3 text-xs text-muted-foreground">Loading…</div>
 				) : materials.length === 0 ? (
 					<div data-testid="course-materials-empty" className="px-2 py-3 text-xs text-muted-foreground">
-						No materials yet. Upload slides (.pptx), PDFs, photos of notes, or text files, and their ideas join your knowledge graph. Upload a
-						marked test and its results are recorded on the ideas it tests.
+						No materials yet. Upload slides (.pptx), Word documents (.docx), PDFs, photos of notes, or text files, and their ideas join your
+						knowledge graph. Upload a marked test and its results are recorded on the ideas it tests.
+						{!courseId && " Upload folder takes a whole folder at once and lets you check each file first."}
 					</div>
 				) : (
 					materials.map((material) => (
 						<MaterialRow
 							key={material.id}
 							material={material}
+							where={courseId ? undefined : materialFolder(material)}
 							confirmingDelete={deletingId === material.id}
 							onReview={() => setReviewingId(material.id)}
 							onResults={() => setReviewingId(material.id)}

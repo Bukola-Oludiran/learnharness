@@ -18,6 +18,11 @@
  *             questions are linked to the ideas that source now holds and
  *             each marked question becomes a line of learner evidence.
  *
+ * A material belongs to a course or to none (the library, phase 3b2). At
+ * most MATERIAL_CONCURRENCY materials convert or extract at once; the rest
+ * wait as `queued`, so a folder upload of hundreds of files neither floods
+ * the model provider nor holds every file in memory.
+ *
  * In-flight work lives in a globalThis registry (the turn-liveness idiom:
  * Next dev gives each route its own module instance). A `processing`
  * record with no registry entry was orphaned by a restart and reads as
@@ -31,8 +36,8 @@ import { abortExtraction, NotesImportError } from "../agent/subagents/extraction
 import { getHeadless } from "../agent/subagents/headless.ts";
 import { emit } from "../core/events.ts";
 import { cleanTestReading, testEvidenceOf, testIdeasText, testScore } from "../core/evidence.ts";
-import { assembleTranscript, detectMaterialFormat, materialSourcePath, materialTitle, transcriptForExtraction } from "../core/material.ts";
-import { MAX_MATERIAL_BYTES, MAX_TEST_PAGES, type MaterialFormat, type MaterialKind, type MaterialRecord, type MaterialView, type TestReading } from "../core/contracts.ts";
+import { assembleTranscript, detectMaterialFormat, librarySourcePath, materialSourcePath, materialTitle, transcriptForExtraction } from "../core/material.ts";
+import { MATERIAL_CONCURRENCY, MAX_MATERIAL_BYTES, MAX_TEST_PAGES, type MaterialFormat, type MaterialKind, type MaterialRecord, type MaterialView, type TestReading } from "../core/contracts.ts";
 import { ModelsNotConfiguredError, ProviderKeyMissingError } from "../core/settings.ts";
 import { extraction } from "./chat-handler.ts";
 import { removeMaterialEvidence } from "./evidence.ts";
@@ -49,6 +54,13 @@ export type MaterialOutcome =
 export interface UploadedFile {
 	name: string;
 	bytes: Uint8Array;
+}
+
+/** Where an upload goes: a course, or (no course) the library, filed under
+ *  the file's folder-relative `path` when it came from a folder upload. */
+export interface UploadTarget {
+	courseId?: unknown;
+	path?: string | null;
 }
 
 export interface MaterialsDeps {
@@ -68,8 +80,44 @@ export interface MaterialsDeps {
 	removeEvidence: (materialId: string) => void;
 }
 
+interface MaterialSlots {
+	active: number;
+	waiting: (() => void)[];
+}
 interface LhMaterialsGlobal {
 	__lhMaterialRuns?: Map<string, AbortController>;
+	__lhMaterialSlots?: MaterialSlots;
+}
+function slots(): MaterialSlots {
+	const g = globalThis as typeof globalThis & LhMaterialsGlobal;
+	return (g.__lhMaterialSlots ??= { active: 0, waiting: [] });
+}
+/** Take a slot, waiting in line for one. False when aborted while waiting. */
+function acquireSlot(signal: AbortSignal): Promise<boolean> {
+	const state = slots();
+	if (state.active < MATERIAL_CONCURRENCY) {
+		state.active++;
+		return Promise.resolve(true);
+	}
+	return new Promise((resolve) => {
+		const grant = () => {
+			signal.removeEventListener("abort", onAbort);
+			resolve(true);
+		};
+		const onAbort = () => {
+			state.waiting.splice(state.waiting.indexOf(grant), 1);
+			resolve(false);
+		};
+		state.waiting.push(grant);
+		signal.addEventListener("abort", onAbort, { once: true });
+	});
+}
+/** Hand the slot to the next in line, or free it. */
+function releaseSlot(): void {
+	const state = slots();
+	const next = state.waiting.shift();
+	if (next) next();
+	else state.active--;
 }
 function runs(): Map<string, AbortController> {
 	const g = globalThis as typeof globalThis & LhMaterialsGlobal;
@@ -160,14 +208,18 @@ export function createMaterialsService(deps: MaterialsDeps) {
 
 	const extract = (id: string, kind: MaterialKind, signal: AbortSignal) => (kind === "test" ? extractTest(id, signal) : extractNotes(id, signal));
 
-	/** Run `work` as this material's one in-flight job; any failure lands
-	 *  on the record as `failed` with a message the learner can act on. */
+	/** Run `work` as this material's one in-flight job, once a slot is free;
+	 *  any failure lands on the record as `failed` with a message the
+	 *  learner can act on. */
 	function start(id: string, work: (signal: AbortSignal) => Promise<void>): void {
 		const controller = new AbortController();
 		runs().set(id, controller);
+		if (slots().active >= MATERIAL_CONCURRENCY) update(id, { status: "processing", stage: "queued" });
 		void (async () => {
+			let held = false;
 			try {
-				await work(controller.signal);
+				held = await acquireSlot(controller.signal);
+				if (held) await work(controller.signal);
 			} catch (error) {
 				if (!controller.signal.aborted) {
 					const expected = error instanceof ConversionError || error instanceof TranscriptionError || error instanceof TestReadError;
@@ -175,6 +227,7 @@ export function createMaterialsService(deps: MaterialsDeps) {
 					update(id, { status: "failed", stage: undefined, error: failureMessage(error) });
 				}
 			} finally {
+				if (held) releaseSlot();
 				if (runs().get(id) === controller) runs().delete(id);
 				// The registry entry is part of the view (`interrupted`).
 				emit("materials-changed", {});
@@ -229,30 +282,47 @@ export function createMaterialsService(deps: MaterialsDeps) {
 		});
 	}
 
-	function create(courseId: unknown, kind: MaterialKind, format: MaterialFormat, name: string, files: readonly UploadedFile[]): MaterialOutcome {
-		const course = typeof courseId === "string" ? courseStore.getCourse(courseId) : null;
-		if (!course) return { ok: false, status: 404, code: "course_not_found", error: "No such course" };
+	function create(target: UploadTarget, kind: MaterialKind, format: MaterialFormat, name: string, files: readonly UploadedFile[]): MaterialOutcome {
+		const inLibrary = target.courseId === undefined || target.courseId === null || target.courseId === "";
+		const course = typeof target.courseId === "string" && !inLibrary ? courseStore.getCourse(target.courseId) : null;
+		if (!inLibrary && !course) return { ok: false, status: 404, code: "course_not_found", error: "No such course" };
 		const record = materialStore.createMaterial(
 			{
 				title: materialTitle(name),
 				kind,
 				format,
-				courseId: course.id,
+				...(course ? { courseId: course.id } : {}),
 				fileName: name,
 				sections: [],
 				status: "processing",
 				stage: "converting",
 				aiReadParts: 0,
-				sourcePath: materialSourcePath(course.title, name),
+				sourcePath: course ? materialSourcePath(course.title, name) : librarySourcePath(target.path, name),
 			},
 			files.map((file) => ({ bytes: file.bytes, extension: extensionOf(file.name) })),
 		);
-		courseStore.saveCourse({ ...course, materialIds: [...new Set([...(course.materialIds ?? []), record.id])] });
+		if (course) courseStore.saveCourse({ ...course, materialIds: [...new Set([...(course.materialIds ?? []), record.id])] });
 		startConversion(record.id);
 		return { ok: true, material: view(materialStore.getMaterial(record.id) ?? record) };
 	}
 
+	const retryable = (record: MaterialRecord) => record.status === "failed" || view(record).interrupted;
+	function retry(record: MaterialRecord): void {
+		if (record.approvedAt) {
+			update(record.id, { status: "processing", stage: "extracting", error: undefined });
+			start(record.id, (signal) => extract(record.id, record.kind, signal));
+		} else {
+			update(record.id, { status: "processing", stage: "converting", error: undefined });
+			startConversion(record.id);
+		}
+	}
+
 	return {
+		/** Every material — the library's view — oldest upload first. */
+		listMaterials(): MaterialView[] {
+			return materialStore.listMaterials().map(view);
+		},
+
 		/** A course's materials, oldest upload first. */
 		listCourseMaterials(courseId: string): MaterialView[] {
 			return materialStore.listMaterials().filter((m) => m.courseId === courseId).map(view);
@@ -264,17 +334,17 @@ export function createMaterialsService(deps: MaterialsDeps) {
 			return record ? { material: view(record), text: materialStore.readText(id), reading: materialStore.readReading(id) } : null;
 		},
 
-		/** Store an upload of notes against a course and start converting it. */
-		uploadMaterial(courseId: unknown, fileName: string, bytes: Uint8Array): MaterialOutcome {
+		/** Store an upload of notes and start converting it. */
+		uploadMaterial(target: UploadTarget, fileName: string, bytes: Uint8Array): MaterialOutcome {
 			if (bytes.byteLength > MAX_MATERIAL_BYTES) return { ok: false, status: 413, code: "too_large", error: "Too big. Max 25 MB." };
 			const name = baseName(fileName);
 			const verdict = detectMaterialFormat(name, bytes);
 			if ("refused" in verdict) return { ok: false, status: 400, code: "unsupported", error: verdict.refused };
-			return create(courseId, "notes", verdict.format, name, [{ name, bytes }]);
+			return create(target, "notes", verdict.format, name, [{ name, bytes }]);
 		},
 
 		/** Store a marked test — its pages as photos, or one scanned PDF — as ONE material. */
-		uploadTest(courseId: unknown, files: readonly UploadedFile[]): MaterialOutcome {
+		uploadTest(target: UploadTarget, files: readonly UploadedFile[]): MaterialOutcome {
 			if (files.length === 0) return { ok: false, status: 400, code: "no_files", error: "Choose the photos or PDF of the marked test." };
 			if (files.length > MAX_TEST_PAGES) return { ok: false, status: 400, code: "too_many_pages", error: `A test can have at most ${pages(MAX_TEST_PAGES)}.` };
 			if (files.reduce((total, file) => total + file.bytes.byteLength, 0) > 2 * MAX_MATERIAL_BYTES) {
@@ -293,7 +363,7 @@ export function createMaterialsService(deps: MaterialsDeps) {
 			if (formats.includes("pdf") && named.length > 1) {
 				return { ok: false, status: 400, code: "unsupported", error: "Upload either one PDF or the pages as photos, not both." };
 			}
-			return create(courseId, "test", formats[0]!, named[0]!.name, named);
+			return create(target, "test", formats[0]!, named[0]!.name, named);
 		},
 
 		/**
@@ -328,17 +398,17 @@ export function createMaterialsService(deps: MaterialsDeps) {
 		retryMaterial(id: string): MaterialOutcome {
 			const record = materialStore.getMaterial(id);
 			if (!record) return NOT_FOUND;
-			if (!(record.status === "failed" || view(record).interrupted)) {
-				return { ok: false, status: 409, code: "not_retryable", error: "This material is not in a failed state." };
-			}
-			if (record.approvedAt) {
-				update(id, { status: "processing", stage: "extracting", error: undefined });
-				start(id, (signal) => extract(id, record.kind, signal));
-			} else {
-				update(id, { status: "processing", stage: "converting", error: undefined });
-				startConversion(id);
-			}
+			if (!retryable(record)) return { ok: false, status: 409, code: "not_retryable", error: "This material is not in a failed state." };
+			retry(record);
 			return { ok: true, material: view(materialStore.getMaterial(id)!) };
+		},
+
+		/** Retry every failed or interrupted material (after a usage limit or
+		 *  a restart mid-folder). Returns how many were restarted. */
+		retryAllMaterials(): number {
+			const stuck = materialStore.listMaterials().filter(retryable);
+			for (const record of stuck) retry(record);
+			return stuck.length;
 		},
 
 		/** Remove the stored files and record, and a test's results with it.
@@ -350,7 +420,7 @@ export function createMaterialsService(deps: MaterialsDeps) {
 			runs().delete(id);
 			if (record.stage === "extracting") deps.abortExtraction(sourceIdOf(record.sourcePath));
 			if (record.kind === "test") deps.removeEvidence(id);
-			const course = courseStore.getCourse(record.courseId);
+			const course = record.courseId ? courseStore.getCourse(record.courseId) : null;
 			if (course?.materialIds?.includes(id)) {
 				courseStore.saveCourse({ ...course, materialIds: course.materialIds.filter((m) => m !== id) });
 			}

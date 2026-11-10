@@ -211,7 +211,7 @@ describe("a marked test, end to end", () => {
 	let testId = "";
 
 	it("several pages become one material that waits for review", async () => {
-		const outcome = service.uploadTest(course.id, pages);
+		const outcome = service.uploadTest({ courseId: course.id }, pages);
 		assert.ok(outcome.ok);
 		testId = outcome.material.id;
 		assert.deepEqual([outcome.material.kind, outcome.material.format], ["test", "image"]);
@@ -252,7 +252,7 @@ describe("a marked test, end to end", () => {
 	});
 
 	it("a failure after approval retries from extraction, keeping the learner's edits", async () => {
-		const outcome = service.uploadTest(course.id, pages);
+		const outcome = service.uploadTest({ courseId: course.id }, pages);
 		assert.ok(outcome.ok);
 		await settled(outcome.material.id);
 		behavior.linkFails = true;
@@ -270,12 +270,12 @@ describe("a marked test, end to end", () => {
 	});
 
 	it("refuses papers that are not photos or one PDF, and oversize sets", () => {
-		const code = (files: { name: string; bytes: Uint8Array }[]) => (service.uploadTest(course.id, files) as { code: string }).code;
+		const code = (files: { name: string; bytes: Uint8Array }[]) => (service.uploadTest({ courseId: course.id }, files) as { code: string }).code;
 		assert.equal(code([]), "no_files");
 		assert.equal(code([{ name: "notes.md", bytes: Buffer.from("# hi") }]), "unsupported");
 		assert.equal(code([{ name: "a.pdf", bytes: Buffer.from("%PDF-1.7") }, { name: "b.png", bytes: PNG }]), "unsupported");
 		assert.equal(code(Array.from({ length: 11 }, (_, i) => ({ name: `p${i}.png`, bytes: PNG }))), "too_many_pages");
-		assert.equal((service.uploadTest("course_missing", pages) as { code: string }).code, "course_not_found");
+		assert.equal((service.uploadTest({ courseId: "course_missing" }, pages) as { code: string }).code, "course_not_found");
 	});
 });
 
