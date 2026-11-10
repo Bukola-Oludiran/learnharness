@@ -34,6 +34,7 @@ import { collectToolCallIds } from "./pi/call-ids.ts";
 import { providerEventNote } from "../agent/provider-events.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 import { courseContextFor } from "./courses.ts";
+import { hasPhotoAnswers, PHOTO_ANSWER_RULE } from "../core/attachments.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
 import { providerKeyPresent } from "./keys.ts";
 import { CLAUDE_CODE_PROVIDER } from "../core/contracts/claude-code.ts";
@@ -58,6 +59,7 @@ import { asAgentMessages } from "../core/native-messages.ts";
 import {
 	ChatInputError,
 	inputAppends,
+	assertAttachmentsUploaded,
 	parseChatInput,
 	questionRecoveryAppends,
 	retryDrops,
@@ -324,6 +326,7 @@ export async function handleChatInput(
 	// follow-up queue and never builds an input event at all.
 	let appends;
 	try {
+		assertAttachmentsUploaded(input, record.imageSnapshots); // fork (FORK.md)
 		appends =
 			input.type === "steers"
 				? input.steers.filter((s) => !steerDelivered(record.messages, s.id))
@@ -461,8 +464,12 @@ export async function handleChatInput(
 		// point as the tool delta — the agent layer composes the system
 		// prompt fresh per turn, swapping in any enabled override segments.
 		promptSwitches: effective.agent.prompts,
-		// Fork (FORK.md): resolved per turn, so the chat record needs no course field.
-		courseContext: courseContextFor(chatId),
+		// Fork (FORK.md): per-session prompt segments, resolved per turn — the
+		// course context (so the chat record needs no course field) and the
+		// photo rule, present only once the session holds a photo answer.
+		extraSegments: [courseContextFor(chatId), hasPhotoAnswers(agentMessages) ? PHOTO_ANSWER_RULE : undefined]
+			.filter((segment): segment is string => segment !== undefined),
+		imageSnapshots: record.imageSnapshots,
 	};
 	// PRACTICE BRANCH (owner design, 2026-10-04): a kind:"practice"
 	// session builds the practitioner from turn 1 — no prober→teacher

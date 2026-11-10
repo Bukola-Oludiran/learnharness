@@ -22,6 +22,7 @@ import { createReadTool, readTool } from "./tools/read.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
 import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
+import type { ImagePool } from "../core/attachments.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 
@@ -123,9 +124,13 @@ export interface AgentBuildOptions {
 	 *  fresh per turn, honoring enabled overrides (switch on + file
 	 *  exists); absent → the cached pure-source composition. */
 	promptSwitches?: Record<string, boolean>;
-	/** Fork (FORK.md): the session's course-context segment, appended after
-	 *  the composed prompt. Absent → the prompt is byte-identical to upstream. */
-	courseContext?: string;
+	/** Fork (FORK.md): per-session prompt segments (course context, the
+	 *  photo-answer rule), appended in order after the composed prompt.
+	 *  Absent or empty → the prompt is byte-identical to upstream. */
+	extraSegments?: readonly string[];
+	/** Fork (FORK.md): the session's image pool — answer attachments are
+	 *  stored as ids and become images at the provider boundary. */
+	imageSnapshots?: ImagePool;
 	/** Native conversation identity: the existing persisted chat id, reused
 	 * across reconstructed prober, teacher, and practice Agents.
 	 * Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream events
@@ -190,7 +195,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	const instructions = opts.promptSwitches
 		? composeInstructions(kind, opts.promptSwitches)
 		: composedInstructions[kind]!;
-	const composedPrompt = opts.courseContext ? `${instructions}\n\n---\n\n${opts.courseContext}` : instructions;
+	const composedPrompt = [instructions, ...(opts.extraSegments ?? [])].join("\n\n---\n\n");
 	const systemPrompt = narrationGuard ? `${composedPrompt}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : composedPrompt;
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
@@ -243,7 +248,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 		// UI-only markers (plan-block) drop, the app's id fields strip, and
 		// an abort's dangling question call gets its INTERRUPTED result. It
 		// must never throw (pi's convertToLlm contract).
-		convertToLlm: toLlmMessages,
+		convertToLlm: (messages) => toLlmMessages(messages, opts.imageSnapshots),
 		prepareRequest: (request) => {
 			if (opts.callPurpose) {
 				let learner = false, automatic = false;

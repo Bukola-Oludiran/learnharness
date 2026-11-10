@@ -46,9 +46,9 @@ describe("courseContextSegment", () => {
 describe("the agent seam", () => {
 	it("appends the segment after the composed prompt, for teaching and practice agents", () => {
 		const segment = courseContextSegment({ title: "Linear algebra", goal: "Pass." });
-		const teacher = createTeacherAgent(undefined, { engine: fauxEngine(), courseContext: segment });
+		const teacher = createTeacherAgent(undefined, { engine: fauxEngine(), extraSegments: [segment] });
 		assert.equal(teacher.state.systemPrompt, `${composeInstructions("teacher")}\n\n---\n\n${segment}`);
-		const practice = createPracticeAgent({} as never, { engine: fauxEngine(), tools: {}, courseContext: segment });
+		const practice = createPracticeAgent({} as never, { engine: fauxEngine(), tools: {}, extraSegments: [segment] });
 		assert.equal(practice.state.systemPrompt, `${composeInstructions("practice")}\n\n---\n\n${segment}`);
 	});
 
