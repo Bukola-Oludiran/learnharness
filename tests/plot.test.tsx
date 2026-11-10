@@ -207,3 +207,93 @@ describe("the grapher in 3D", () => {
 		assert.match(description, /The box runs from -5 to 5 on each axis unless you set it\./);
 	});
 });
+
+// ── Phase 5c2: the keypad ───────────────────────────────────────────────────
+describe("the scientific keypad", () => {
+	const noop = () => {};
+
+	it("a key inserts at the cursor, lands inside brackets, and wraps a selection", async () => {
+		const { applyKey, KEYPAD } = await import("../components/plot/keypad.tsx");
+		const key = (tab: "main" | "functions" | "letters", label: string) => KEYPAD[tab].keys.find((k) => k.label === label)!;
+		assert.deepEqual(applyKey("y = ", 4, 4, key("functions", "sin")), { text: "y = sin()", caret: 8 });
+		assert.deepEqual(applyKey("y = x + 1", 4, 9, key("functions", "sin")), { text: "y = sin(x + 1)", caret: 14 });
+		assert.deepEqual(applyKey("x", 1, 1, key("main", "x²")), { text: "x^2", caret: 3 });
+		assert.deepEqual(applyKey("23", 1, 1, key("main", "×")), { text: "2*3", caret: 2 });
+		assert.deepEqual(applyKey("", 0, 0, key("main", "√")), { text: "sqrt()", caret: 5 });
+		assert.deepEqual(applyKey("x", 0, 1, key("main", "|a|")), { text: "|x|", caret: 3 });
+		assert.deepEqual(applyKey("", 0, 0, key("functions", "logₐ")), { text: "log(, )", caret: 4 });
+		assert.deepEqual(applyKey("", 0, 0, key("functions", "nCr")), { text: "nCr(, )", caret: 4 });
+		assert.deepEqual(applyKey("2", 1, 1, key("main", "π")), { text: "2pi", caret: 3 });
+		assert.deepEqual(applyKey("y = ", 4, 4, key("letters", "λ")), { text: "y = λ", caret: 5 });
+		assert.deepEqual(applyKey("r = ", 4, 4, key("letters", "θ")), { text: "r = theta", caret: 9 });
+		// A reversed or out-of-range selection is put right.
+		assert.deepEqual(applyKey("abc", 9, 1, key("main", "7")), { text: "a7", caret: 2 });
+	});
+
+	it("moves, deletes and starts a new line", async () => {
+		const { applyKey } = await import("../components/plot/keypad.tsx");
+		assert.deepEqual(applyKey("abc", 2, 2, { label: "←", action: "left" }), { text: "abc", caret: 1 });
+		assert.deepEqual(applyKey("abc", 0, 0, { label: "←", action: "left" }), { text: "abc", caret: 0 });
+		assert.deepEqual(applyKey("abc", 3, 3, { label: "→", action: "right" }), { text: "abc", caret: 3 });
+		assert.deepEqual(applyKey("abc", 1, 3, { label: "→", action: "right" }), { text: "abc", caret: 3 });
+		assert.deepEqual(applyKey("abc", 2, 2, { label: "⌫", action: "backspace" }), { text: "ac", caret: 1 });
+		assert.deepEqual(applyKey("abc", 0, 2, { label: "⌫", action: "backspace" }), { text: "c", caret: 0 });
+		assert.deepEqual(applyKey("abc", 0, 0, { label: "⌫", action: "backspace" }), { text: "abc", caret: 0 });
+		assert.deepEqual(applyKey("abc", 1, 1, { label: "↵", action: "enter" }), { enter: true });
+	});
+
+	it("every key types something the grapher can read", async () => {
+		const { applyKey, KEYPAD } = await import("../components/plot/keypad.tsx");
+		const { tokenize } = await import("../src/core/plot/index.ts");
+		for (const tab of Object.values(KEYPAD)) {
+			for (const key of tab.keys) {
+				const result = applyKey("", 0, 0, key) as { text: string };
+				// A lone "." is half a number; every key is read in the middle of one.
+				assert.doesNotThrow(() => tokenize(`1${result.text}1`), `${key.label} types ${JSON.stringify(result.text)}`);
+			}
+		}
+		// Each function key names a function the parser knows, with the right number of slots.
+		const { parseExpr } = await import("../src/core/plot/index.ts");
+		for (const key of KEYPAD.functions.keys) {
+			if (!key.insert?.endsWith(")")) continue;
+			const filled = key.insert.includes(", ") ? key.insert.replace("(, )", "(6, 2)") : key.insert.replace("()", "(0.5)");
+			assert.doesNotThrow(() => parseExpr(filled), `${key.label} → ${filled}`);
+		}
+	});
+
+	it("renders three tabs with the action row, and keys that never take the focus", async () => {
+		const { Keypad } = await import("../components/plot/keypad.tsx");
+		const main = renderToStaticMarkup(<Keypad onKey={noop} />);
+		assert.match(main, /data-testid="keypad-tab-main"[^>]*aria-selected="true"[\s\S]*data-testid="keypad-tab-functions"[\s\S]*data-testid="keypad-tab-letters"/);
+		assert.equal(main.match(/data-testid="keypad-key"/g)!.length, 30 + 4);
+		assert.match(main, /data-key="sqrt\(\)" aria-label="square root"/);
+		assert.match(main, /data-key="enter" aria-label="new line"[^>]*tabindex="-1"[^>]*style="grid-column:span 3"/);
+		const functions = renderToStaticMarkup(<Keypad onKey={noop} initialTab="functions" />);
+		assert.equal(functions.match(/data-testid="keypad-key"/g)!.length, 36 + 4);
+		assert.match(functions, />sin⁻¹<[\s\S]*>logₐ<[\s\S]*>ⁿ√<[\s\S]*>nCr</);
+		assert.equal(renderToStaticMarkup(<Keypad onKey={noop} initialTab="letters" />).match(/data-testid="keypad-key"/g)!.length, 36 + 4);
+	});
+
+	it("the grapher shows answers, the angle switch, and the keypad toggle", async () => {
+		const { AngleSwitch, Grapher } = await import("../components/plot/grapher.tsx");
+		const row = (text: string, before: string[] = []) => {
+			const d = doc([...before, text]);
+			const index = d.lines.length - 1;
+			return renderToStaticMarkup(
+				<ExpressionRow line={d.lines[index]!} meaning={resolvePlot(d).lines[index]!} index={index} onText={noop} onToggle={noop} onRemove={noop} onEnter={noop} onSlider={noop} onRange={noop} onAddSlider={noop} />,
+			);
+		};
+		assert.match(row("5!"), /data-kind="value"[\s\S]*data-testid="plot-line-value"[^>]*>= (<!-- -->)?120</);
+		assert.match(row("b = 2a", ["a = 3"]), /data-testid="plot-line-value"[^>]*>= (<!-- -->)?6</);
+		assert.doesNotMatch(row("a = 3"), /plot-line-value/, "a slider shows its own number");
+		assert.match(renderToStaticMarkup(<AngleSwitch degrees onDegrees={noop} />), /data-testid="plot-angles-rad" aria-pressed="false"[\s\S]*data-testid="plot-angles-deg" aria-pressed="true"/);
+		const grapher = renderToStaticMarkup(<Grapher doc={doc(["y = x"])} onChange={noop} />);
+		assert.match(grapher, /data-testid="plot-mode"[\s\S]*data-testid="plot-angles"[\s\S]*data-testid="keypad-toggle" aria-label="Show the keypad" aria-pressed="false"/);
+		assert.doesNotMatch(grapher, /data-testid="keypad"/, "hidden until toggled");
+		assert.equal(hasDrawableLines(doc(["5!", "a = 1"])), false);
+	});
+
+	it("the tool takes degrees, as approved", () => {
+		assert.match(createGraphTool().description, /Angles are in radians unless you set angles to degrees\./);
+	});
+});

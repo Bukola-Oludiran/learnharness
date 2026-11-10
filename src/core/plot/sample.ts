@@ -61,8 +61,9 @@ export function sampleParametric(x: Compiled, y: Compiled, scope: Scope, tMin: n
 	return out;
 }
 
-/** A polar curve r(theta) for theta in [tMin, tMax]. */
-export function samplePolar(r: Compiled, scope: Scope, tMin: number, tMax: number, samples: number): Polyline[] {
+/** A polar curve r(theta) for theta in [tMin, tMax]; theta is in degrees when `degrees` is set. */
+export function samplePolar(r: Compiled, scope: Scope, tMin: number, tMax: number, samples: number, degrees = false): Polyline[] {
+	const toRadians = degrees ? Math.PI / 180 : 1;
 	const out: Polyline[] = [];
 	let current: Polyline = [];
 	const local: Scope = { ...scope };
@@ -75,7 +76,7 @@ export function samplePolar(r: Compiled, scope: Scope, tMin: number, tMax: numbe
 			current = [];
 			continue;
 		}
-		current.push([radius * Math.cos(theta), radius * Math.sin(theta)]);
+		current.push([radius * Math.cos(theta * toRadians), radius * Math.sin(theta * toRadians)]);
 	}
 	if (current.length > 1) out.push(current);
 	return out;
