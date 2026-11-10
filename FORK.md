@@ -56,6 +56,15 @@ Add one row per edit, in the same pull request that makes it.
 
 - The compaction threshold estimates the system prompt from `composeInstructions` alone (`src/server/chat-handler.ts`), so it does not count the course-context segment. The segment is at most a few hundred tokens.
 
+## Local app
+
+`scripts/install-local-app.sh` builds the fork as a macOS app and installs it at `/Applications/LearnHarness.app`. It layers `electron-builder.local.yml` over upstream's `electron-builder.yml`, which stays unedited.
+
+- The build is ad-hoc signed and not notarized, so it runs only on the machine that built it.
+- It carries no update feed. Upstream's feed would replace the fork with upstream's app. The in-app update check logs an error and does nothing.
+- It shares upstream's app name and data folder (`~/Library/Application Support/LearnHarness`). Do not install upstream's app beside it.
+- Run the script from a checkout outside iCloud Drive, and from a shell where `ELECTRON_RUN_AS_NODE` is unset when launching the app by hand (editor terminals set it, and the app then exits at once).
+
 ## Workflows
 
 - `ci.yml` is unchanged. It runs on every pull request, whatever the base branch, which covers each phase's pull request into `buildout`. It does not run on direct pushes to `buildout`.
