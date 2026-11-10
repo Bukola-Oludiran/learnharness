@@ -60,7 +60,7 @@ const TRIG = ["sin", "cos", "tan", "sec", "csc", "cot"];
 const HYPERBOLIC = ["sinh", "cosh", "tanh"];
 /** LaTeX command → the grapher's function name. */
 const COMMAND_FUNCTIONS: Record<string, string> = {
-	...Object.fromEntries([...TRIG, ...HYPERBOLIC, "ln", "log", "exp", "min", "max", "gcd"].map((name) => [name, name])),
+	...Object.fromEntries([...TRIG, ...HYPERBOLIC, "ln", "log", "exp", "min", "max", "gcd", "det"].map((name) => [name, name])),
 	arcsin: "asin", arccos: "acos", arctan: "atan", arcsec: "asec", arccsc: "acsc", arccot: "acot", arctg: "atan", tg: "tan", cosec: "csc", ctg: "cot",
 	arsinh: "asinh", arcosh: "acosh", artanh: "atanh", lg: "log",
 };
@@ -71,7 +71,7 @@ const GREEK: Record<string, string> = {
 const SPACING = new Set([",", ";", ":", "!", " ", "quad", "qquad", "enspace", "thinspace", "displaystyle", "textstyle", "limits", "nolimits"]);
 const SYMBOL_COMMANDS: Record<string, string> = {
 	// Named symbols are set off by spaces so they never run into a neighbouring letter (co·θ is not cot).
-	cdot: "*", times: "*", ast: "*", div: "/", pi: " pi ", theta: " theta ", vartheta: " theta ", exponentialE: "e", lbrack: "[", rbrack: "]", lparen: "(", rparen: ")", "{": "(", "}": ")",
+	cdot: "*", times: " × ", ast: "*", top: "T", intercal: "T", div: "/", pi: " pi ", theta: " theta ", vartheta: " theta ", exponentialE: "e", lbrack: "[", rbrack: "]", lparen: "(", rparen: ")", "{": "(", "}": ")",
 	lt: "<", gt: ">", le: "<", ge: ">", leq: "<", geq: ">", "%": "%",
 };
 const OPEN: Record<string, string> = { "(": ")", "[": "]" };
@@ -139,7 +139,10 @@ class LatexReader {
 		if (name === "sqrt") return this.root();
 		if (name === "int") return this.integral();
 		if (name === "sum" || name === "prod") return this.series(name);
-		if (name === "operatorname" || name === "mathrm" || name === "text" || name === "mathit" || name === "mathbf") {
+		if (name === "begin") return this.environment();
+		// \vec{v} is v: the arrow is decoration.
+		if (name === "vec" || name === "overrightarrow" || name === "boldsymbol") return sub(this.groupArgument());
+		if (name === "operatorname" || name === "mathrm" || name === "text" || name === "mathit" || name === "mathbf" || name === "mathsf") {
 			const word = this.wordArgument();
 			if (name === "operatorname" || isFunctionName(word.toLowerCase()) || isBinderName(word.toLowerCase())) return this.functionCall(word);
 			return word;
@@ -166,13 +169,40 @@ class LatexReader {
 			return tok.ch;
 		}
 		if (tok.kind === "cmd") {
-			if (tok.name === "lvert" || tok.name === "vert" || tok.name === "rvert" || tok.name === "|") return opening ? "abs(" : ")";
+			if (["lvert", "vert", "rvert", "|", "lVert", "Vert", "rVert"].includes(tok.name)) return opening ? "abs(" : ")";
 			if (tok.name === "lfloor") return "floor(";
 			if (tok.name === "lceil") return "ceil(";
 			if (tok.name === "rfloor" || tok.name === "rceil") return ")";
 			if (tok.name in SYMBOL_COMMANDS) return SYMBOL_COMMANDS[tok.name]!;
 		}
 		throw new ExprError("That bracket is not something the grapher understands.");
+	}
+
+	/** \begin{bmatrix} a & b \\ c & d \end{bmatrix}: a matrix, as [[a, b], [c, d]]. */
+	private environment(): string {
+		const kind = this.wordArgument();
+		if (!["matrix", "pmatrix", "bmatrix", "Bmatrix", "vmatrix"].includes(kind)) throw new ExprError(`\\begin{${kind}} is not something the grapher understands.`);
+		const rows: Tok[][][] = [[[]]];
+		let depth = 0;
+		for (;;) {
+			const tok = this.toks[this.at++];
+			if (!tok) throw new ExprError("There is an unmatched bracket.");
+			if (tok.kind === "cmd" && tok.name === "begin") depth++;
+			if (tok.kind === "cmd" && tok.name === "end") {
+				if (depth === 0) break;
+				depth--;
+			}
+			const row = rows.at(-1)!;
+			if (depth === 0 && tok.kind === "cmd" && tok.name === "\\") rows.push([[]]);
+			else if (depth === 0 && tok.kind === "char" && tok.ch === "&") row.push([]);
+			else row.at(-1)!.push(tok);
+		}
+		this.at++; // the {bmatrix} after \end
+		// A line break after the last row leaves an empty one behind.
+		if (rows.length > 1 && rows.at(-1)!.length === 1 && rows.at(-1)![0]!.length === 0) rows.pop();
+		const grid = `[${rows.map((row) => `[${row.map((cell) => sub(cell)).join(", ")}]`).join(", ")}]`;
+		// Straight bars around a grid are its determinant.
+		return kind === "vmatrix" ? ` det(${grid})` : grid;
 	}
 
 	/** What follows ^ or _: a braced group, or one token. */
@@ -478,7 +508,7 @@ export function readLatex(latex: string): { text: string; problem?: undefined } 
 const GREEK_COMMAND = Object.fromEntries(Object.entries(GREEK).filter(([name]) => !name.startsWith("var")).map(([name, ch]) => [ch, `\\${name}`]));
 /** The grapher's function name → its LaTeX command, where LaTeX has one. */
 const FUNCTION_COMMAND: Record<string, string> = {
-	...Object.fromEntries([...TRIG, ...HYPERBOLIC, "ln", "log", "exp", "min", "max", "gcd"].map((name) => [name, `\\${name}`])),
+	...Object.fromEntries([...TRIG, ...HYPERBOLIC, "ln", "log", "exp", "min", "max", "gcd", "det"].map((name) => [name, `\\${name}`])),
 	asin: "\\arcsin", acos: "\\arccos", atan: "\\arctan", arcsin: "\\arcsin", arccos: "\\arccos", arctan: "\\arctan",
 };
 const PRETTY_NAME: Record<string, string> = { ncr: "nCr", npr: "nPr" };
@@ -529,6 +559,7 @@ function bare(expr: Expr): string {
 			if (expr.op === "^") return `${print(expr.left, ATOM)}^{${print(expr.right)}}`;
 			const left = print(expr.left, PRODUCT);
 			const right = print(expr.right, expr.right.type === "neg" ? ATOM : PRODUCT);
+			if (expr.cross) return `${left}\\times ${right}`;
 			// Juxtapose where it reads unambiguously; otherwise a dot.
 			const leftIsLetter = expr.left.type === "var" || expr.left.type === "apply";
 			const dot = expr.right.type === "num" || (expr.right.type === "bin" && expr.right.op === "^" && expr.right.left.type === "num") || (leftIsLetter && right.startsWith("\\left("));

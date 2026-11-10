@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import {
 	curve3, DEFAULT_BOX, implicitMesh, niceStep, parameterRanges, paramSurfaceMesh, PLOT_COLORS, resolvePlot, surfaceMesh, tickLabel, ticks, type Mesh, type PlotBox, type PlotDoc, type Point3,
 } from "@/src/core";
+import { vectorLabel } from "./draw";
 import type { PlotCanvasHandle } from "./plot-canvas";
 
 /**
@@ -79,7 +80,7 @@ function build(stage: Stage, doc: PlotDoc, width: number, height: number): void 
 	const half = [(box.xMax - box.xMin) / 2, (box.yMax - box.yMin) / 2, (box.zMax - box.zMin) / 2];
 	const norm = (p: readonly number[], offset = 0): Point3 => [(p[offset]! - centre[0]!) / half[0]!, (p[offset + 1]! - centre[1]!) / half[1]!, (p[offset + 2]! - centre[2]!) / half[2]!];
 
-	const addMesh = (mesh: Mesh, color: string) => {
+	const addMesh = (mesh: Mesh, color: string, opacity = 0.88) => {
 		if (mesh.indices.length === 0) return;
 		const positions = new Float32Array(mesh.positions.length);
 		for (let i = 0; i < mesh.positions.length; i += 3) positions.set(norm(mesh.positions, i), i);
@@ -96,16 +97,46 @@ function build(stage: Stage, doc: PlotDoc, width: number, height: number): void 
 			geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
 		} else geometry.computeVertexNormals();
 		stage.content.add(
-			new THREE.Mesh(geometry, new THREE.MeshPhongMaterial({ color, side: THREE.DoubleSide, shininess: 28, transparent: true, opacity: 0.88, clippingPlanes: CLIP })),
+			new THREE.Mesh(geometry, new THREE.MeshPhongMaterial({ color, side: THREE.DoubleSide, shininess: 28, transparent: true, opacity, clippingPlanes: CLIP })),
 		);
 	};
-	const addCurve = (points: Point3[], color: string) => {
+	const addCurve = (points: Point3[], color: string, dashed = false) => {
 		const geometry = new LineGeometry();
 		geometry.setPositions(points.flatMap((p) => norm(p)));
-		const material = new LineMaterial({ color, linewidth: 3, clippingPlanes: CLIP });
+		const material = new LineMaterial({ color, linewidth: dashed ? 2 : 3, clippingPlanes: CLIP, ...(dashed ? { dashed: true, dashSize: 0.07, gapSize: 0.05 } : {}) });
 		material.resolution.set(width, height);
 		stage.lineMaterials.push(material);
-		stage.content.add(new Line2(geometry, material));
+		const line = new Line2(geometry, material);
+		if (dashed) line.computeLineDistances();
+		stage.content.add(line);
+	};
+	const labels: Label[] = [];
+	/** An arrow between two graph points: a shaft and a cone, sized in the cube's own units so it looks the same in any box. */
+	const addArrow = (from: Point3, to: Point3, color: string, dashed = false) => {
+		const start = new THREE.Vector3(...norm(from));
+		const end = new THREE.Vector3(...norm(to));
+		const length = start.distanceTo(end);
+		if (length < 1e-6) {
+			const dot = new THREE.Mesh(new THREE.SphereGeometry(0.03, 16, 12), new THREE.MeshPhongMaterial({ color, clippingPlanes: CLIP }));
+			dot.position.copy(end);
+			stage.content.add(dot);
+			return;
+		}
+		const direction = end.clone().sub(start).divideScalar(length);
+		const head = Math.min(dashed ? 0.09 : 0.13, length);
+		const neck = end.clone().addScaledVector(direction, -head);
+		const geometry = new LineGeometry();
+		geometry.setPositions([start.x, start.y, start.z, neck.x, neck.y, neck.z]);
+		const material = new LineMaterial({ color, linewidth: dashed ? 2 : 3.5, clippingPlanes: CLIP, ...(dashed ? { dashed: true, dashSize: 0.07, gapSize: 0.05 } : {}) });
+		material.resolution.set(width, height);
+		stage.lineMaterials.push(material);
+		const shaft = new Line2(geometry, material);
+		if (dashed) shaft.computeLineDistances();
+		stage.content.add(shaft);
+		const cone = new THREE.Mesh(new THREE.ConeGeometry(head * 0.32, head, 20), new THREE.MeshPhongMaterial({ color, clippingPlanes: CLIP }));
+		cone.position.copy(end).addScaledVector(direction, -head / 2);
+		cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+		stage.content.add(cone);
 	};
 
 	const resolved = resolvePlot(doc);
@@ -127,6 +158,28 @@ function build(stage: Stage, doc: PlotDoc, width: number, height: number): void 
 			case "curve3":
 				for (const part of curve3(line.x, line.y, line.z, resolved.scope, ranges.t[0], ranges.t[1], CURVE_SAMPLES)) addCurve(part, color);
 				break;
+			case "vector": {
+				if (line.value.length !== 3 || !line.value.every(Number.isFinite)) break;
+				const tip = line.value as Point3;
+				if (line.guide && line.guide.from.length === 3 && line.guide.from.every(Number.isFinite)) addArrow(line.guide.from as Point3, tip, color, true);
+				addArrow([0, 0, 0], tip, color);
+				const label = vectorLabel(line.name, source.text);
+				const at = new THREE.Vector3(...norm(tip));
+				if (label && Math.max(Math.abs(at.x), Math.abs(at.y), Math.abs(at.z)) <= 1.001) labels.push({ at: at.multiplyScalar(1.06).add(new THREE.Vector3(0, 0, 0.06)), text: label, bold: true });
+				break;
+			}
+			case "span": {
+				// Far enough to cross the whole box from the origin, wherever the box sits; the box clips the rest.
+				const reach = 2 * Math.hypot(Math.max(Math.abs(box.xMin), Math.abs(box.xMax)), Math.max(Math.abs(box.yMin), Math.abs(box.yMax)), Math.max(Math.abs(box.zMin), Math.abs(box.zMax)));
+				const along = (b: readonly number[], amount: number): Point3 => [b[0]! * amount, b[1]! * amount, b[2]! * amount];
+				const [a, b] = line.basis;
+				if (line.basis.length === 1 && a) addCurve([along(a, -reach), along(a, reach)], color);
+				if (line.basis.length === 2 && a && b) {
+					const corner = (s: number, t: number) => [a[0]! * s + b[0]! * t, a[1]! * s + b[1]! * t, a[2]! * s + b[2]! * t];
+					addMesh({ positions: [corner(-reach, -reach), corner(reach, -reach), corner(reach, reach), corner(-reach, reach)].flat(), indices: [0, 1, 2, 0, 2, 3] }, color, 0.45);
+				}
+				break;
+			}
 			case "points3":
 				for (const point of line.points) {
 					if (!point.every(Number.isFinite)) continue;
@@ -143,7 +196,6 @@ function build(stage: Stage, doc: PlotDoc, width: number, height: number): void 
 	}
 
 	// Tick labels along three edges of the box, and the axis names beyond them.
-	const labels: Label[] = [];
 	const axisTicks = (min: number, max: number) => {
 		const step = niceStep(max - min, 5);
 		return ticks(min, max, 5).map((value) => ({ value, text: tickLabel(value, step) }));

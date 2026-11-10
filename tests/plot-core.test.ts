@@ -123,7 +123,7 @@ describe("how a line is understood", () => {
 		assert.match(errorOf("sin(x) = "), /missing on one side/);
 		assert.equal(errorOf("(1, 2, 3)"), "A point with three coordinates needs a 3D graph.");
 		assert.equal(errorOf("(1, 2, 3, 4)"), "A point needs two coordinates.");
-		assert.equal(errorOf("[[1, 0], [0, 1]]"), "Matrices arrive in a later version of the grapher.");
+		assert.equal(resolvePlot(doc(["[[1, 0], [0, 1]]"])).lines[0]!.kind, "matrix", "a matrix is a value now (phase 5d)");
 		assert.equal(errorOf("y^2"), "Write this as an equation, such as x = … or y = ….");
 		assert.equal(errorOf("a = 3", ["a = 2"]), '"a" is already defined above.');
 		assert.equal(errorOf("r = x + 1"), '"r" cannot be used in this kind of expression.');

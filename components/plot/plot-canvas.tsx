@@ -1,15 +1,17 @@
 "use client";
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { squareView, zoomView, type PlotDoc, type PlotView } from "@/src/core";
-import { DARK_THEME, drawPlot, LIGHT_THEME } from "./draw";
+import { resolvePlot, squareView, withVectorValue, zoomView, type PlotDoc, type PlotView } from "@/src/core";
+import { DARK_THEME, drawPlot, LIGHT_THEME, TIP_REACH } from "./draw";
 
 /**
  * The live plot (fork, phase 5b — see FORK.md): a canvas that draws a graph
  * document and lets the learner pan (drag) and zoom (wheel, buttons). Units
  * are kept square: the document's x range is the truth and the y range is
  * fitted to the canvas around the view's centre, so circles look round.
+ * A named vector written as plain numbers can be dragged by its tip
+ * (phase 5d): the drag rewrites the numbers in its line.
  */
 
 export interface PlotCanvasHandle {
@@ -26,16 +28,23 @@ export const PlotCanvas = forwardRef<
 	{
 		doc: PlotDoc;
 		onView?: (view: PlotView) => void;
+		/** An edit made on the plot itself (a dragged vector). */
+		onDoc?: (doc: PlotDoc) => void;
 		/** "wheel": the scroll wheel zooms (the full-window grapher). "pinch":
 		 *  only a pinch does, so a graph inside the lesson never traps scrolling. */
 		zoomWith?: "wheel" | "pinch";
 		className?: string;
 	}
->(function PlotCanvas({ doc, onView, zoomWith = "wheel", className }, ref) {
+>(function PlotCanvas({ doc, onView, onDoc, zoomWith = "wheel", className }, ref) {
 	const wrapRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const [size, setSize] = useState({ width: 0, height: 0 });
-	const drag = useRef<{ x: number; y: number; view: PlotView } | null>(null);
+	const drag = useRef<{ x: number; y: number; view: PlotView } | { vector: string } | null>(null);
+	const [overTip, setOverTip] = useState(false);
+	const tips = useMemo(
+		() => (onDoc ? resolvePlot(doc).lines.flatMap((line, index) => (line.kind === "vector" && line.draggable && !doc.lines[index]!.hidden ? [{ id: line.id, x: line.value[0]!, y: line.value[1]! }] : [])) : []),
+		[doc, onDoc],
+	);
 
 	useEffect(() => {
 		const wrap = wrapRef.current;
@@ -90,6 +99,19 @@ export const PlotCanvas = forwardRef<
 			y: view.yMax - ((clientY - rect.top) / rect.height) * (view.yMax - view.yMin),
 		};
 	};
+	/** The draggable vector whose tip is under the pointer; the last drawn wins. */
+	const tipAt = (clientX: number, clientY: number): string | null => {
+		const canvas = canvasRef.current;
+		if (!canvas || tips.length === 0) return null;
+		const rect = canvas.getBoundingClientRect();
+		const view = shown();
+		for (const tip of [...tips].reverse()) {
+			const tipX = rect.left + ((tip.x - view.xMin) / (view.xMax - view.xMin)) * rect.width;
+			const tipY = rect.top + ((view.yMax - tip.y) / (view.yMax - view.yMin)) * rect.height;
+			if (Math.hypot(clientX - tipX, clientY - tipY) <= TIP_REACH) return tip.id;
+		}
+		return null;
+	};
 	const zoomBy = (factor: number, at?: { x: number; y: number }) => {
 		if (!onView) return;
 		const view = shown();
@@ -118,15 +140,30 @@ export const PlotCanvas = forwardRef<
 		<div ref={wrapRef} data-testid="plot-canvas" className={cn("relative overflow-hidden", className)}>
 			<canvas
 				ref={canvasRef}
-				className={cn("block size-full touch-none", onView && "cursor-grab active:cursor-grabbing")}
+				className={cn("block size-full touch-none", overTip ? "cursor-move" : onView && "cursor-grab active:cursor-grabbing")}
 				onPointerDown={(event) => {
-					if (!onView) return;
+					const vector = tipAt(event.clientX, event.clientY);
+					if (!vector && !onView) return;
 					event.currentTarget.setPointerCapture(event.pointerId);
-					drag.current = { x: event.clientX, y: event.clientY, view: shown() };
+					drag.current = vector ? { vector } : { x: event.clientX, y: event.clientY, view: shown() };
 				}}
 				onPointerMove={(event) => {
 					const start = drag.current;
-					if (!start || !onView) return;
+					if (!start) {
+						const over = tipAt(event.clientX, event.clientY) !== null;
+						if (over !== overTip) setOverTip(over);
+						return;
+					}
+					if ("vector" in start) {
+						// Rounded to about four pixels' worth, so a drag lands on tidy numbers.
+						const rect = event.currentTarget.getBoundingClientRect();
+						const view = shown();
+						const digits = Math.max(0, Math.min(6, Math.ceil(-Math.log10((view.xMax - view.xMin) / rect.width)) - 1));
+						const point = graphPoint(event.clientX, event.clientY);
+						onDoc?.(withVectorValue(doc, start.vector, [Number(point.x.toFixed(digits)), Number(point.y.toFixed(digits))]));
+						return;
+					}
+					if (!onView) return;
 					const rect = event.currentTarget.getBoundingClientRect();
 					const dx = ((event.clientX - start.x) / rect.width) * (start.view.xMax - start.view.xMin);
 					const dy = ((event.clientY - start.y) / rect.height) * (start.view.yMax - start.view.yMin);

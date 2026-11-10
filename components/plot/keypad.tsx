@@ -4,7 +4,7 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * The grapher's scientific keypad (fork, phases 5c2–5c3 — see FORK.md).
+ * The grapher's scientific keypad (fork, phases 5c2–5d — see FORK.md).
  * A key has no logic of its own: it inserts at the cursor of the focused
  * expression line (or moves the cursor, deletes, or starts a new line). In
  * the maths editor it inserts a structure; in a plain text box, text.
@@ -30,7 +30,7 @@ export interface Key {
 // Each key carries two spellings: `insert` for a plain text box, `latex` for
 // the maths editor, where #? is a box to fill and #@ takes what is selected
 // (or, with nothing selected, what stands before the cursor — as "/" does).
-const command = (name: string) => (["sin", "cos", "tan", "sec", "csc", "cot", "sinh", "cosh", "tanh", "ln", "log", "exp", "min", "max", "gcd"].includes(name) ? `\\${name}` : `\\operatorname{${name}}`);
+const command = (name: string) => (["sin", "cos", "tan", "sec", "csc", "cot", "sinh", "cosh", "tanh", "ln", "log", "exp", "min", "max", "gcd", "det"].includes(name) ? `\\${name}` : `\\operatorname{${name}}`);
 const LATEX_NAME: Record<string, string> = { asin: "\\arcsin", acos: "\\arccos", atan: "\\arctan" };
 const fn = (label: string, name: string, args = 1): Key => ({
 	label,
@@ -42,7 +42,21 @@ const fn = (label: string, name: string, args = 1): Key => ({
 const k = (label: string, insert = label, name?: string, latex?: string): Key => ({ label, insert, ...(name ? { name } : {}), ...(latex ? { latex } : {}) });
 const GREEK_COMMANDS: Record<string, string> = { α: "alpha", β: "beta", γ: "gamma", δ: "delta", λ: "lambda", μ: "mu", σ: "sigma", φ: "phi", ω: "omega" };
 
-export type KeypadTab = "main" | "functions" | "calculus" | "letters";
+export type KeypadTab = "main" | "functions" | "calculus" | "vectors" | "letters";
+
+/** A matrix key: an empty grid in the editor, [[, ], [, ]] in a text box. */
+const grid = (size: number): Key => {
+	const row = Array.from({ length: size }, () => "").join(", ");
+	const insert = `[${Array.from({ length: size }, () => `[${row}]`).join(", ")}]`;
+	return {
+		label: `${size}×${size}`,
+		insert,
+		// The cursor lands in the first entry.
+		back: insert.length - 2,
+		latex: `\\begin{bmatrix}${Array.from({ length: size }, () => Array.from({ length: size }, () => "#?").join("&")).join("\\\\")}\\end{bmatrix}`,
+		name: `${size} by ${size} matrix`,
+	};
+};
 
 export const KEYPAD: Record<KeypadTab, { columns: number; keys: Key[] }> = {
 	main: {
@@ -82,6 +96,19 @@ export const KEYPAD: Record<KeypadTab, { columns: number; keys: Key[] }> = {
 			{ label: "f(x)", insert: "f()", back: 1, latex: "f\\left(#?\\right)", name: "call f" },
 			{ label: "f′", insert: "f'()", back: 1, latex: "f'\\left(#?\\right)", name: "derivative of f" },
 			k("′", "'", "prime"), k("n"), k("k"), k("i"),
+		],
+	},
+	// Phase 5d: vectors and matrices.
+	vectors: {
+		columns: 4,
+		keys: [
+			{ label: "(a, b)", insert: "(, )", back: 3, latex: "\\left(#?,#?\\right)", name: "vector with two entries" },
+			{ label: "(a, b, c)", insert: "(, , )", back: 5, latex: "\\left(#?,#?,#?\\right)", name: "vector with three entries" },
+			grid(2), grid(3),
+			grid(4), k("u·v", "*", "dot product", "\\cdot "), k("u×v", "×", "cross product", "\\times "), { label: "|v|", insert: "norm()", back: 1, latex: "\\left|#?\\right|", name: "length of a vector" },
+			k("Aᵀ", "^T", "transpose", "^{T}"), k("A⁻¹", "^-1", "inverse", "^{-1}"), fn("det", "det"), fn("trace", "trace"),
+			fn("span", "span"), k("u"), k("v"), k("w"),
+			k("A"), k("B"), k("="), k(","),
 		],
 	},
 	letters: {
@@ -129,7 +156,7 @@ export function applyKey(text: string, selectionStart: number, selectionEnd: num
 	}
 }
 
-const TAB_LABEL: Record<KeypadTab, string> = { main: "123", functions: "f(x)", calculus: "∫ Σ", letters: "abc" };
+const TAB_LABEL: Record<KeypadTab, string> = { main: "123", functions: "f(x)", calculus: "∫ Σ", vectors: "[ ]", letters: "abc" };
 const KEY = "flex h-8 items-center justify-center rounded-sm border border-border/70 bg-card text-xs transition-colors hover:bg-accent active:bg-accent/70";
 
 export function Keypad({ onKey, initialTab = "main" }: { onKey: (key: Key) => void; initialTab?: KeypadTab }) {

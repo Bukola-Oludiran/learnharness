@@ -5,7 +5,7 @@ import { KeyboardIcon, PlusIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Keypad, type Key } from "./keypad";
 import { MATH_LINE_CSS, MathLine, type LineHandle } from "./math-line";
-import { formatValue, functionHeader, withoutTypeset, DEFAULT_SLIDER, MAX_LINE_CHARS, MAX_PLOT_LINES, nextLineId, PLOT_COLORS, resolvePlot, withMode, withSliderValue, type PlotDoc, type PlotLine, type PlotMode, type ResolvedLine } from "@/src/core";
+import { formatEntry, formatResult, formatValue, functionHeader, withoutTypeset, DEFAULT_SLIDER, MAX_LINE_CHARS, MAX_PLOT_LINES, nextLineId, PLOT_COLORS, resolvePlot, withMode, withSliderValue, type PlotDoc, type PlotLine, type PlotMode, type ResolvedLine } from "@/src/core";
 import { PlotCanvas, type PlotCanvasHandle } from "./plot-canvas";
 
 /**
@@ -37,7 +37,7 @@ export function PlotSurface({
 			</Suspense>
 		);
 	}
-	return <PlotCanvas ref={canvasRef} doc={doc} onView={(view) => onChange({ ...doc, view })} zoomWith={zoomWith} className={className} />;
+	return <PlotCanvas ref={canvasRef} doc={doc} onView={(view) => onChange({ ...doc, view })} onDoc={onChange} zoomWith={zoomWith} className={className} />;
 }
 
 /** The radians / degrees switch (phase 5c2). Pure — exported for render tests. */
@@ -95,7 +95,24 @@ export function withSlider(doc: PlotDoc, name: string): PlotDoc {
 
 /** Whether the document has anything to draw. Pure. */
 export function hasDrawableLines(doc: PlotDoc): boolean {
-	return resolvePlot(doc).lines.some((line, index) => !doc.lines[index]!.hidden && !["empty", "error", "definition", "value"].includes(line.kind));
+	return resolvePlot(doc).lines.some((line, index) => !doc.lines[index]!.hidden && !["empty", "error", "definition", "value", "matrix", "function"].includes(line.kind));
+}
+
+/** A matrix result, set out as a grid between brackets. Pure — exported for render tests. */
+export function MatrixValue({ rows }: { rows: readonly (readonly number[])[] }) {
+	return (
+		<span data-testid="plot-line-matrix" role="img" aria-label={formatResult(rows as number[][])} className="inline-flex items-center gap-1.5 align-middle">
+			<span>=</span>
+			{/* Square brackets: a side rule with a short foot at top and bottom. */}
+			<span className="inline-flex items-stretch">
+				<span aria-hidden className="w-1 rounded-l-[2px] border-y border-l border-muted-foreground/70" />
+				<span className="inline-grid gap-x-3 gap-y-0.5 px-1 py-0.5 text-right" style={{ gridTemplateColumns: `repeat(${rows[0]?.length ?? 1}, auto)` }}>
+					{rows.flatMap((row, i) => row.map((entry, j) => <span key={`${i}-${j}`}>{formatEntry(entry)}</span>))}
+				</span>
+				<span aria-hidden className="w-1 rounded-r-[2px] border-y border-r border-muted-foreground/70" />
+			</span>
+		</span>
+	);
 }
 
 const NUMBER_FIELD = "w-14 rounded-sm border border-input bg-background px-1 py-0.5 text-right font-mono text-xs";
@@ -152,7 +169,7 @@ export function ExpressionRow({
 					aria-pressed={!line.hidden}
 					onClick={onToggle}
 					className="size-4 shrink-0 rounded-full border-2"
-					style={{ borderColor: color, backgroundColor: line.hidden || meaning.kind === "definition" ? "transparent" : color }}
+					style={{ borderColor: color, backgroundColor: line.hidden || meaning.kind === "definition" || meaning.kind === "matrix" ? "transparent" : color }}
 				/>
 				<MathLine
 					text={line.text}
@@ -192,6 +209,21 @@ export function ExpressionRow({
 			{(meaning.kind === "value" || (meaning.kind === "definition" && !meaning.slider)) && (
 				<p data-testid="plot-line-value" className="mt-1 pl-6 font-mono text-xs text-muted-foreground">
 					= {formatValue(meaning.value)}
+				</p>
+			)}
+			{meaning.kind === "vector" && !meaning.literal && (
+				<p data-testid="plot-line-value" className="mt-1 pl-6 font-mono text-xs text-muted-foreground">
+					= {formatResult(meaning.value)}
+				</p>
+			)}
+			{meaning.kind === "matrix" && !meaning.literal && (
+				<p className="mt-1 pl-6 font-mono text-xs text-muted-foreground">
+					<MatrixValue rows={meaning.value} />
+				</p>
+			)}
+			{meaning.kind === "span" && (
+				<p data-testid="plot-line-value" className="mt-1 pl-6 text-xs text-muted-foreground">
+					= {meaning.note}
 				</p>
 			)}
 			{meaning.kind === "definition" && meaning.slider && (

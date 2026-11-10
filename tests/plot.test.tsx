@@ -264,7 +264,7 @@ describe("the scientific keypad", () => {
 	it("renders three tabs with the action row, and keys that never take the focus", async () => {
 		const { Keypad } = await import("../components/plot/keypad.tsx");
 		const main = renderToStaticMarkup(<Keypad onKey={noop} />);
-		assert.match(main, /data-testid="keypad-tab-main"[^>]*aria-selected="true"[\s\S]*data-testid="keypad-tab-functions"[\s\S]*data-testid="keypad-tab-calculus"[\s\S]*data-testid="keypad-tab-letters"/);
+		assert.match(main, /data-testid="keypad-tab-main"[^>]*aria-selected="true"[\s\S]*data-testid="keypad-tab-functions"[\s\S]*data-testid="keypad-tab-calculus"[\s\S]*data-testid="keypad-tab-vectors"[\s\S]*data-testid="keypad-tab-letters"/);
 		const calculus = renderToStaticMarkup(<Keypad onKey={noop} initialTab="calculus" />);
 		assert.equal(calculus.match(/data-testid="keypad-key"/g)!.length, 12 + 4);
 		assert.match(calculus, /aria-label="definite integral"[\s\S]*aria-label="derivative"[\s\S]*aria-label="sum"[\s\S]*aria-label="product"[\s\S]*aria-label="define a function"/);
@@ -314,7 +314,7 @@ describe("the maths editor's keys and lines", () => {
 				const filled = `3${(key.latex ?? key.insert ?? "").replace(/#@/g, "3").replace(/#\?/g, "2")}`.replace(/^3\\frac\{3\}/, "\\frac{3}");
 				let text = "";
 				assert.doesNotThrow(() => { text = latexToText(filled); }, `${tab} ${key.label}: ${filled}`);
-				if (key.label === "f(x)=" || ["(", ")", ",", "=", "^", "÷", "×", "+", "−", "."].includes(key.label)) continue; // not whole expressions alone
+				if (key.label === "f(x)=" || ["(", ")", ",", "=", "^", "÷", "×", "+", "−", ".", "u·v", "u×v"].includes(key.label)) continue; // not whole expressions alone
 				assert.doesNotThrow(() => parseExpr(text.replace(/^3\s*'$/, "3"), tab === "calculus" ? new Set(["f"]) : undefined), `${tab} ${key.label}: ${filled} → ${text}`);
 			}
 		}
