@@ -98,6 +98,10 @@ Add one row per edit, in the same pull request that makes it.
 - A PDF with no bookmarks is sectioned by the cheap model from each page's opening lines, then by equal 20-page runs if that fails. A mostly scanned PDF with no bookmarks goes straight to equal runs.
 - The folder checklist's book pre-selection reads a PDF's page count from its bytes, which works only when the page tree is uncompressed. The server-side pause for notes PDFs over 80 pages covers the rest.
 - Before 4a the proxy body limit was 26 MiB, so a marked test over that size was refused despite its 50 MB limit.
+- A course lists library books in `bookIds`; a book carries no course. A book deleted from the library leaves a stale id that reads as absent.
+- The syllabus is built only on request, by one strong-slot call that sees the books' contents lists (chapters only past 250 sections), never their text. A build runs in the server process; a restart mid-build leaves the syllabus as it was.
+- A rebuild replaces every unit that is not covered, including skipped ones and hand edits. Units cannot be added by hand, and a unit's sections and prerequisites cannot be edited; reordering does not check prerequisites.
+- The tutor is told a course's ready books but not its syllabus; sessions are not scoped to units and no unit becomes active or covered until phase 4c.
 - Vision transcription usage is not written to any usage log (upstream's notes pipeline logs its own extraction usage on the source record).
 
 ## Local app
