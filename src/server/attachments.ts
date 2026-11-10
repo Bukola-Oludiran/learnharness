@@ -35,7 +35,7 @@ export function isHeif(bytes: Uint8Array): boolean {
 
 /** HEIC → JPEG through macOS's own `sips`. The image pipeline has no HEIC
  *  decoder; on other systems the learner is told to convert first. */
-async function heifToJpeg(bytes: Uint8Array): Promise<Uint8Array> {
+export async function heifToJpeg(bytes: Uint8Array): Promise<Uint8Array> {
 	if (process.platform !== "darwin") {
 		throw new Error("HEIC photos can only be converted on macOS; attach a JPEG or PNG instead");
 	}

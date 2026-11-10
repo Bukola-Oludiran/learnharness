@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DumbbellIcon, PlusIcon } from "lucide-react";
 import { CourseFormDialog, DeleteCourseDialog } from "@/components/course-dialogs";
+import { CourseMaterials } from "@/components/course-materials";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import { SessionRow } from "@/components/sidebar";
 import { TopBar } from "@/components/top-bar";
@@ -55,7 +56,10 @@ export function CourseHomeBody({
 	onAddSession,
 	onEdit,
 	onDelete,
+	materials,
 }: {
+	/** The Materials section (its own data and events); a slot so this body stays pure. */
+	materials?: React.ReactNode;
 	course: CourseRecord;
 	/** null while the session list loads. */
 	chats: ChatListItem[] | null;
@@ -106,6 +110,8 @@ export function CourseHomeBody({
 					</button>
 				</div>
 			</section>
+
+			{materials}
 
 			<section className="mt-8">
 				<div className="flex items-center justify-between">
@@ -298,6 +304,7 @@ export function CourseHome({ initialCourse }: { initialCourse: CourseRecord }) {
 					onQuery={setQuery}
 					onEdit={() => setEditing(true)}
 					onDelete={() => setDeleting(true)}
+					materials={<CourseMaterials courseId={courseId} />}
 				/>
 			</div>
 			<CourseFormDialog

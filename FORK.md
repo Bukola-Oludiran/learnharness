@@ -38,13 +38,13 @@ Add one row per edit, in the same pull request that makes it.
 
 | Upstream file | Change | For | Phase |
 | --- | --- | --- | --- |
-| `config.ts` | `PATHS.courses`. | Courses | 1 |
-| `src/core/contracts.ts` | Re-exports `contracts/course.ts`. | Courses | 1 |
-| `src/core/ports.ts` | `CourseStore` interface and its `CourseRecord` import. | Courses | 1 |
-| `src/core/events.ts` | `courses-changed` in `ServerEvents` and `SERVER_EVENT_TYPES`. | Courses | 1 |
-| `src/server/stores.ts` | Wires `courseStore` into `stores`. | Courses | 1 |
-| `src/server/index.ts` | Re-exports `courses.ts` and `attachments.ts`. | Courses, photo answers | 1, 2 |
-| `src/core/index.ts` | Re-exports `attachments.ts`. | Photo answers | 2 |
+| `config.ts` | `PATHS.courses` and `PATHS.materials`. | Courses, materials | 1, 3a |
+| `src/core/contracts.ts` | Re-exports `contracts/course.ts` and `contracts/material.ts`. | Courses, materials | 1, 3a |
+| `src/core/ports.ts` | `CourseStore` and `MaterialStore` interfaces and their record imports. | Courses, materials | 1, 3a |
+| `src/core/events.ts` | `courses-changed` and `materials-changed` in `ServerEvents` and `SERVER_EVENT_TYPES`. | Courses, materials | 1, 3a |
+| `src/server/stores.ts` | Wires `courseStore` and `materialStore` into `stores`. | Courses, materials | 1, 3a |
+| `src/server/index.ts` | Re-exports `courses.ts`, `attachments.ts` and `materials.ts`. | Courses, photo answers, materials | 1, 2, 3a |
+| `src/core/index.ts` | Re-exports `attachments.ts` and `material.ts`. | Photo answers, materials | 2, 3a |
 | `src/agent/teacher-agent.ts` | `AgentBuildOptions.extraSegments`, appended in order after the composed prompt in `baseAgentOptions`. | Course context, photo rule | 1, 2 |
 | `src/agent/teacher-agent.ts` | `AgentBuildOptions.imageSnapshots`, passed to `toLlmMessages` in `convertToLlm`. | Photo answers | 2 |
 | `src/server/chat-handler.ts` | Passes `extraSegments` (course context, photo rule) and `imageSnapshots` in `agentOpts`. | Course context, photo answers | 1, 2 |
@@ -70,6 +70,10 @@ Add one row per edit, in the same pull request that makes it.
 - Answer photos are resolved from the image pool as it stood when the turn started.
 - Dropping a file on a dock keeps upstream's behavior (it inserts the file's path); photos are attached with the button or by pasting.
 - HEIC photos are converted with macOS `sips`; on other systems the upload is refused with a message.
+- Materials carry no slide or page anchors into the graph yet: a material is one notes source, as upstream imports are. Anchors come with the evidence work (phase 3b).
+- Deleting a material removes its stored file and record only. Ideas it added stay in the graph; upstream's source deletion removes those.
+- Material conversion runs in the server process. A restart mid-run leaves the record `processing` with no worker; it reads as interrupted and Retry starts over from the stored original.
+- Vision transcription usage is not written to any usage log (upstream's notes pipeline logs its own extraction usage on the source record).
 
 ## Local app
 
