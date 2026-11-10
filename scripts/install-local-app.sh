@@ -26,7 +26,7 @@ npm run build
 node scripts/smoke-provider-runtime.mjs
 node scripts/build-server.mjs
 node scripts/smoke-server.mjs
-npx electron-builder --mac --arm64 --config electron-builder.local.yml --publish never
+npx electron-builder --mac --arm64 --dir --config electron-builder.local.yml --publish never
 
 codesign --verify --deep --strict "$BUILT"
 if [[ -e "$BUILT/Contents/Resources/app-update.yml" ]]; then
