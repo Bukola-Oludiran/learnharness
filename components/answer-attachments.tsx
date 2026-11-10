@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ImageIcon, PaperclipIcon, XIcon } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { ImageIcon, PaperclipIcon, PencilLineIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ATTACHMENT_ACCEPT, MAX_ANSWER_ATTACHMENTS } from "@/src/core";
 
@@ -13,6 +13,11 @@ import { ATTACHMENT_ACCEPT, MAX_ANSWER_ATTACHMENTS } from "@/src/core";
  * route, which stores it in the session image pool and returns its
  * snapshot id. The answer then carries ids only. Dropping a file on the
  * dock keeps upstream's behavior (it inserts the file's path).
+ *
+ * Phase 5a adds drawings: the Draw button opens the canvas
+ * (canvas-editor.tsx, loaded only when first opened); a finished drawing
+ * uploads like a photo, and its scene is then kept under the snapshot id
+ * so it can be reopened later in the session.
  *
  * This module is the DOCK side and deliberately imports nothing from
  * chat.tsx (the docks are mounted standalone in tests and must not pull the
@@ -48,6 +53,10 @@ export interface AnswerAttachments {
 	/** A notice about the last add (too many, not an image). */
 	notice: string | null;
 	addFiles: (files: Iterable<File>) => void;
+	/** A canvas drawing: its picture uploads like a photo, then its scene is saved under the snapshot id. */
+	addDrawing: (image: File, scene: string) => void;
+	/** The session attachments go to; absent → nothing can be attached. */
+	chatId?: string;
 	remove: (key: string) => void;
 	clear: () => void;
 	/** Capture-phase paste handler for the dock: image data in the clipboard
@@ -66,7 +75,7 @@ export function useAnswerAttachments(chatId: string | undefined): AnswerAttachme
 	useEffect(() => () => release(itemsRef.current), []);
 
 	const upload = useCallback(
-		async (key: string, file: File) => {
+		async (key: string, file: File, scene?: string) => {
 			const settle = (patch: Partial<AttachmentItem>) =>
 				setItems((prev) => prev.map((item) => (item.key === key ? { ...item, ...patch } : item)));
 			if (!chatId) {
@@ -83,6 +92,15 @@ export function useAnswerAttachments(chatId: string | undefined): AnswerAttachme
 				if (!res.ok || typeof body.snapshotId !== "string") {
 					settle({ status: "error", error: body.error ?? `Upload failed (${res.status}).` });
 					return;
+				}
+				if (scene !== undefined) {
+					// The picture is in; keep the editable scene beside it. A drawing
+					// whose scene cannot be saved still goes as its picture.
+					await fetch(`/api/chats/${encodeURIComponent(chatId)}/canvases/${body.snapshotId}`, {
+						method: "PUT",
+						headers: { "Content-Type": "application/json" },
+						body: scene,
+					}).catch(() => undefined);
 				}
 				settle({ status: "ready", snapshotId: body.snapshotId });
 			} catch {
@@ -118,6 +136,20 @@ export function useAnswerAttachments(chatId: string | undefined): AnswerAttachme
 		[upload],
 	);
 
+	const addDrawing = useCallback(
+		(image: File, scene: string) => {
+			if (itemsRef.current.length >= MAX_ANSWER_ATTACHMENTS) {
+				setNotice(`An answer can carry at most ${MAX_ANSWER_ATTACHMENTS} photos and drawings.`);
+				return;
+			}
+			setNotice(null);
+			const item = { key: crypto.randomUUID(), name: "Drawing", previewUrl: URL.createObjectURL(image), status: "uploading" as const };
+			setItems((prev) => [...prev, item]);
+			void upload(item.key, image, scene);
+		},
+		[upload],
+	);
+
 	const remove = useCallback((key: string) => {
 		setItems((prev) => {
 			release(prev.filter((item) => item.key === key));
@@ -145,15 +177,48 @@ export function useAnswerAttachments(chatId: string | undefined): AnswerAttachme
 		[addFiles],
 	);
 
-	return { items, uploading: items.some((item) => item.status === "uploading"), notice, addFiles, remove, clear, onPasteCapture };
+	return { items, uploading: items.some((item) => item.status === "uploading"), notice, addFiles, addDrawing, chatId, remove, clear, onPasteCapture };
 }
 
-/** The attach button: opens the system file picker for images. */
+// Excalidraw is large and browser-only: fetched the first time the canvas opens.
+const CanvasEditor = lazy(() => import("@/components/canvas-editor"));
+const DOCK_BUTTON =
+	"flex h-9 items-center gap-1.5 rounded-[6px] px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40";
+
+/** The attach buttons: Draw opens the canvas, Photo the system file picker.
+ *  (One component, so the docks that render it needed no further edit.) */
 export function AttachPhotoButton({ attachments, disabled = false }: { attachments: AnswerAttachments; disabled?: boolean }) {
 	const inputRef = useRef<HTMLInputElement>(null);
+	const [drawing, setDrawing] = useState(false);
 	const full = attachments.items.length >= MAX_ANSWER_ATTACHMENTS;
 	return (
 		<>
+			{attachments.chatId && (
+				<button
+					type="button"
+					data-testid="attach-drawing"
+					aria-label="Draw your answer"
+					title={full ? `At most ${MAX_ANSWER_ATTACHMENTS} photos and drawings` : "Draw your answer on a canvas"}
+					disabled={disabled || full}
+					onClick={() => setDrawing(true)}
+					className={DOCK_BUTTON}
+				>
+					<PencilLineIcon className="size-3.5" />
+					Draw
+				</button>
+			)}
+			{drawing && attachments.chatId && (
+				<Suspense fallback={null}>
+					<CanvasEditor
+						chatId={attachments.chatId}
+						onClose={() => setDrawing(false)}
+						onUse={(image, scene) => {
+							attachments.addDrawing(image, scene);
+							setDrawing(false);
+						}}
+					/>
+				</Suspense>
+			)}
 			<input
 				ref={inputRef}
 				type="file"

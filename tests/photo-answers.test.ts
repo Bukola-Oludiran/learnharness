@@ -178,6 +178,8 @@ describe("the tutor's photo rule", () => {
 			"# Photos of the learner's work",
 			"The learner can answer with photos of handwritten or drawn work. They arrive as images beside the answer.",
 			"Before you judge a photo answer, restate in one or two lines what you read from it: the key steps, the values and the final answer as you understood them. Then judge that reading. If part of the image is unclear or cut off, say which part and ask about it. Never mark work wrong on a guess at what it says.",
+			// Phase 5a: the canvas paragraph.
+			"A drawing made on the canvas arrives with an outline of its labelled shapes and arrows. Use the outline for what is labelled and what connects to what, and the image for layout. When you give feedback, name the specific shapes and arrows you mean.",
 		].join("\n\n"));
 	});
 
