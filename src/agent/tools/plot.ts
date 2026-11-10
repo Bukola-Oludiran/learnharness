@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute, type ImageFileResult } from "../tool-execute.ts";
-import { cleanPlotDoc, MAX_LINE_CHARS, resolvePlot, type PlotDoc } from "../../core/plot/index.ts";
+import { cleanPlotDoc, DEFINITION_START, MAX_LINE_CHARS, resolvePlot, type PlotDoc } from "../../core/plot/index.ts";
 
 /**
  * graph (fork, phase 5b — see FORK.md): the tutor puts an interactive graph
@@ -25,6 +25,7 @@ const graphInput = Type.Object({
 		description: "One expression per entry, as plain text, such as y = a*sin(x) or a = 2",
 	}),
 	title: Type.Optional(Type.String({ maxLength: 120, description: "One short line shown above the graph" })),
+	angles: Type.Optional(Type.Union([Type.Literal("radians"), Type.Literal("degrees")], { description: "The unit trig functions use; radians when omitted" })),
 	dimension: Type.Optional(Type.Union([Type.Literal(2), Type.Literal(3)], { description: "2 for a flat graph (the default), 3 for a 3D graph the learner can rotate" })),
 	xMin: Type.Optional(Type.Number({ description: "Left edge of the view; -10 when omitted (-5 in 3D)" })),
 	xMax: Type.Optional(Type.Number({ description: "Right edge of the view; 10 when omitted (5 in 3D)" })),
@@ -51,6 +52,7 @@ export function graphDocOf(input: {
 	expressions: string[];
 	title?: string;
 	dimension?: 2 | 3;
+	angles?: "radians" | "degrees";
 	zMin?: number;
 	zMax?: number;
 	uMin?: number;
@@ -68,8 +70,9 @@ export function graphDocOf(input: {
 	const ranges = new Map((input.sliders ?? []).map((slider) => [slider.name, slider]));
 	const doc = cleanPlotDoc({
 		title: input.title,
+		...(input.angles === "degrees" ? { angles: "degrees" } : {}),
 		lines: input.expressions.map((text) => {
-			const range = ranges.get(/^\s*([A-Za-z])\s*=/.exec(text)?.[1] ?? "");
+			const range = ranges.get(DEFINITION_START.exec(text)?.[1] ?? "");
 			return { text, ...(range ? { min: range.min, max: range.max } : {}) };
 		}),
 		...(input.dimension === 3
@@ -102,7 +105,7 @@ export function createGraphTool(): AgentTool<typeof graphInput> {
 			"Put an interactive graph into the lesson. The learner can pan, zoom, drag its sliders and open it in their own grapher. Instant.",
 			"Give each expression as plain text: a function of x (y = sin(x), or just x^2 - 1); a function of y (x = y^2); an implicit equation (x^2 + y^2 = 9); " +
 				"a parametric curve ((cos(t), sin(2t)), t from 0 to 2π unless you set a range); a polar curve (r = 1 + cos(theta)); points ((1, 2), (3, 4)); " +
-				"or a slider (a = 2), which sets a letter the other expressions can use and the learner can drag. Write multiplication as 2x or 2*x and powers with ^. Angles are in radians.",
+				"or a slider (a = 2), which sets a letter the other expressions can use and the learner can drag. Write multiplication as 2x or 2*x and powers with ^. Angles are in radians unless you set angles to degrees.",
 			"Set dimension to 3 for a 3D graph the learner can rotate. There, give a surface as z = x^2 + y^2 (or just an expression in x and y); " +
 				"any equation in x, y and z as an implicit surface (x^2 + y^2 + z^2 = 9, or a plane 2x + y - z = 4); a space curve as (cos(t), sin(t), t); " +
 				"a parametric surface as (u*cos(v), u*sin(v), v), with u and v from 0 to 2π unless you set ranges; and points as (1, 2, 3). " +

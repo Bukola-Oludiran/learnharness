@@ -19,7 +19,7 @@
  * two modes: `x^2 + y^2 = 4` is a circle in 2D and a cylinder in 3D.
  */
 
-import { compile, ExprError, parseTokens, splitEquation, tokenize, variablesOf, type Compiled, type Expr, type Scope } from "./expr.ts";
+import { compile as compileExpr, ExprError, parseTokens, splitEquation, tokenize, variablesOf, type Compiled, type Expr, type Scope } from "./expr.ts";
 
 export interface PlotView {
 	xMin: number;
@@ -60,6 +60,8 @@ export interface PlotDoc {
 	/** The parameter range of parametric and polar curves. */
 	tMin?: number;
 	tMax?: number;
+	/** Trig in degrees (phase 5c2); radians when absent. */
+	angles?: "degrees";
 	/** 3D: the box shown (the 2D view is kept, so switching back restores it). */
 	box?: PlotBox;
 	/** 3D: the parameter ranges of parametric surfaces; 0 to 2π when absent. */
@@ -89,6 +91,8 @@ export type ResolvedLine =
 	| { id: string; kind: "curve3"; x: Compiled; y: Compiled; z: Compiled }
 	| { id: string; kind: "param-surface"; x: Compiled; y: Compiled; z: Compiled }
 	| { id: string; kind: "points3"; points: [number, number, number][] }
+	/** A line with no variables: a calculation, shown as its value and not drawn. */
+	| { id: string; kind: "value"; value: number }
 	| { id: string; kind: "empty" }
 	/** `fix` names the mode in which the line would work, when that is the problem. */
 	| { id: string; kind: "error"; error: string; fix?: PlotMode };
@@ -103,6 +107,9 @@ export class ModeError extends ExprError {
 	}
 }
 
+/** A line that starts like a definition: one letter (Latin or Greek), then =. */
+export const DEFINITION_START = /^\s*([A-Za-zα-ωΑ-Ω])\s*=/;
+
 /** Letters that are coordinates or parameters and so cannot be sliders. `z`
  *  is reserved in 2D too, so a 3D line typed there can say what it needs. */
 const RESERVED_2D = new Set(["x", "y", "z", "t", "r", "theta"]);
@@ -111,13 +118,15 @@ const RESERVED_3D = new Set(["x", "y", "z", "t", "u", "v", "theta"]);
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
 /** A line understood but not yet evaluated: points still hold their coordinate expressions. */
 type Draft =
-	| DistributiveOmit<Exclude<ResolvedLine, { kind: "points" | "points3" }>, "id">
+	| DistributiveOmit<Exclude<ResolvedLine, { kind: "points" | "points3" | "value" }>, "id">
+	| { kind: "value"; fn: Compiled }
 	| { kind: "points"; fns: [Compiled, Compiled][] }
 	| { kind: "points3"; fns: [Compiled, Compiled, Compiled][] };
 type Classified = { line: Draft; define?: { name: string; fn: Compiled } };
 
-function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode): Classified {
+function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode, degrees: boolean): Classified {
 	const RESERVED = mode === "3d" ? RESERVED_3D : RESERVED_2D;
+	const compile = (expr: Expr) => compileExpr(expr, { degrees });
 	const tokens = tokenize(text);
 	if (tokens.length === 0) return { line: { kind: "empty" } };
 	const sides = splitEquation(tokens);
@@ -161,6 +170,8 @@ function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode): C
 		if (vars.has("z")) throw new ModeError("This uses z, so it needs a 3D graph.", "3d");
 		if (vars.has("y") && !vars.has("x")) throw new ExprError("Write this as an equation, such as x = … or y = ….");
 		check(expr, ["x"]);
+		// No x at all: a calculation, not a curve (write y = 5 for the line).
+		if (!vars.has("x")) return { line: { kind: "value", fn: compile(expr) } };
 		return { line: { kind: "explicit-y", fn: compile(expr) } };
 	}
 
@@ -224,6 +235,7 @@ function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode): C
 			const expr = scalar(list);
 			if (variablesOf(expr).has("z")) throw new ExprError("Write this as an equation, such as z = … or … = 0.");
 			check(expr, ["x", "y"]);
+			if (!variablesOf(expr).has("x") && !variablesOf(expr).has("y")) return { line: { kind: "value", fn: compile(expr) } };
 			return { line: { kind: "surface", axis: "z", fn: compile(expr) } };
 		}
 		if (sides.left.length === 0 || sides.right.length === 0) throw new ExprError("Something is missing on one side of =.");
@@ -258,20 +270,21 @@ export interface ResolvedPlot {
 /** Understand every line, top to bottom. A definition is usable by the lines below and above it. */
 export function resolvePlot(doc: Pick<PlotDoc, "lines"> & { mode?: PlotMode }): ResolvedPlot {
 	const mode = doc.mode ?? "2d";
+	const degrees = (doc as { angles?: unknown }).angles === "degrees";
 	const scope: Scope = {};
 	const defined = new Set<string>();
 	// Definitions first, in order, so a curve may use a slider written below it.
 	const drafts = new Map<string, Classified | { error: string; fix?: PlotMode }>();
 	const tryClassify = (line: PlotLine): Classified | { error: string; fix?: PlotMode } => {
 		try {
-			return classify(line.text.slice(0, MAX_LINE_CHARS), defined, mode);
+			return classify(line.text.slice(0, MAX_LINE_CHARS), defined, mode, degrees);
 		} catch (error) {
 			if (error instanceof ModeError) return { error: error.message, fix: error.fix };
 			return { error: error instanceof ExprError ? error.message : "This could not be read." };
 		}
 	};
 	for (const line of doc.lines) {
-		if (!/^\s*[A-Za-z]\s*=/.test(line.text)) continue;
+		if (!DEFINITION_START.test(line.text)) continue;
 		const draft = tryClassify(line);
 		if ("error" in draft || !draft.define) continue;
 		const value = draft.define.fn(scope);
@@ -283,6 +296,7 @@ export function resolvePlot(doc: Pick<PlotDoc, "lines"> & { mode?: PlotMode }): 
 		const draft = drafts.get(line.id) ?? tryClassify(line);
 		if ("error" in draft) return { id: line.id, kind: "error", error: draft.error, ...(draft.fix ? { fix: draft.fix } : {}) };
 		if (draft.line.kind === "points") return { id: line.id, kind: "points", points: draft.line.fns.map(([x, y]) => [x(scope), y(scope)]) };
+		if (draft.line.kind === "value") return { id: line.id, kind: "value", value: draft.line.fn(scope) };
 		if (draft.line.kind === "points3") return { id: line.id, kind: "points3", points: draft.line.fns.map(([x, y, z]) => [x(scope), y(scope), z(scope)]) };
 		if (draft.line.kind === "definition" && !drafts.has(line.id)) return { id: line.id, kind: "error", error: "This definition could not be used." };
 		return { id: line.id, ...draft.line };
@@ -291,6 +305,22 @@ export function resolvePlot(doc: Pick<PlotDoc, "lines"> & { mode?: PlotMode }): 
 }
 
 const fmt = (value: number) => (Number.isFinite(value) ? String(Math.round(value * 1e4) / 1e4) : String(value));
+
+/** A calculation's answer: up to ten significant digits, scientific notation when very large or small. */
+export function formatValue(value: number): string {
+	if (Number.isNaN(value)) return "undefined";
+	if (!Number.isFinite(value)) return value > 0 ? "∞" : "−∞";
+	if (value === 0) return "0";
+	const magnitude = Math.abs(value);
+	if (magnitude >= 1e12 || magnitude < 1e-7) return value.toExponential(9).replace(/\.?0+e/, "e").replace("e+", "e");
+	return String(Number(value.toPrecision(10)));
+}
+
+/** The parameter ranges curves use when the document sets none: a full turn, in the document's angle unit. */
+export function parameterRanges(doc: PlotDoc): { t: [number, number]; u: [number, number]; v: [number, number] } {
+	const turn = doc.angles === "degrees" ? 360 : 2 * Math.PI;
+	return { t: [doc.tMin ?? 0, doc.tMax ?? turn], u: [doc.uMin ?? 0, doc.uMax ?? turn], v: [doc.vMin ?? 0, doc.vMax ?? turn] };
+}
 
 /** Replace a definition line's number (a dragged slider). */
 export function withSliderValue(doc: PlotDoc, lineId: string, value: number): PlotDoc {
@@ -331,6 +361,7 @@ export function cleanPlotDoc(raw: unknown): PlotDoc | null {
 	return {
 		type: "plot",
 		mode: input.mode === "3d" ? "3d" : "2d",
+		...(input.angles === "degrees" ? { angles: "degrees" as const } : {}),
 		...(typeof input.title === "string" && input.title.trim() ? { title: input.title.trim().slice(0, 120) } : {}),
 		lines,
 		view,
@@ -387,11 +418,13 @@ export function plotOutline(doc: PlotDoc): string {
 		const meaning = resolved.lines[index]!;
 		const notes: string[] = [];
 		if (meaning.kind === "definition" && meaning.slider) notes.push(`slider, from ${fmt(line.min ?? DEFAULT_SLIDER.min)} to ${fmt(line.max ?? DEFAULT_SLIDER.max)}`);
+		if (meaning.kind === "value") notes.push(`= ${formatValue(meaning.value)}`);
 		if (meaning.kind === "error") notes.push(`could not be read: ${meaning.error}`);
 		if (line.hidden) notes.push("hidden");
 		rows.push(`${rows.length + 1}. ${line.text.trim()}${notes.length > 0 ? ` (${notes.join("; ")})` : ""}`);
 	}
 	if (rows.length === 0) return "";
+	if (doc.angles === "degrees") rows.unshift("Angles in degrees.");
 	if (doc.mode === "3d") {
 		const box = doc.box ?? DEFAULT_BOX;
 		return ["3D graph.", ...rows, `Box: x from ${fmt(box.xMin)} to ${fmt(box.xMax)}, y from ${fmt(box.yMin)} to ${fmt(box.yMax)}, z from ${fmt(box.zMin)} to ${fmt(box.zMax)}`].join("\n");

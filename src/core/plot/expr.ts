@@ -9,6 +9,8 @@
  *   sin x, sin 2x         a function applies to the product that follows it
  *   -x^2                  is -(x^2); ^ is right-associative
  *   |x|                   absolute value
+ *   5!, x!                factorial, smooth between whole numbers (gamma)
+ *   α, β, λ …             Greek letters are variables like any other letter
  *   (1, 2), [[1,2],[3,4]] tuples and matrices (points now; vectors and
  *                         matrices in later phases)
  */
@@ -24,24 +26,78 @@ export type Expr =
 
 export class ExprError extends Error {}
 
-const FUNCTIONS: Record<string, { arity: number | [number, number]; fn: (...args: number[]) => number }> = {
+/** Γ(x), by the Lanczos approximation; exact enough for graphing and for 10-digit answers. */
+export function gamma(x: number): number {
+	if (x < 0.5) return Math.PI / (Math.sin(Math.PI * x) * gamma(1 - x));
+	const g = 7;
+	const c = [0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+	const y = x - 1;
+	let sum = c[0]!;
+	for (let i = 1; i < g + 2; i++) sum += c[i]! / (y + i);
+	const t = y + g + 0.5;
+	return Math.sqrt(2 * Math.PI) * Math.pow(t, y + 0.5) * Math.exp(-t) * sum;
+}
+
+/** n!, exact for whole numbers up to 170 and gamma(n + 1) in between; undefined at negative whole numbers. */
+export function factorial(n: number): number {
+	if (Number.isInteger(n)) {
+		if (n < 0) return NaN;
+		if (n > 170) return Infinity;
+		let out = 1;
+		for (let i = 2; i <= n; i++) out *= i;
+		return out;
+	}
+	return gamma(n + 1);
+}
+
+function gcd(a: number, b: number): number {
+	if (!Number.isInteger(a) || !Number.isInteger(b)) return NaN;
+	let [x, y] = [Math.abs(a), Math.abs(b)];
+	while (y !== 0) [x, y] = [y, x % y];
+	return x;
+}
+const wholeAndOrdered = (n: number, r: number) => Number.isInteger(n) && Number.isInteger(r) && r >= 0 && n >= r;
+
+const FUNCTIONS: Record<string, { arity: number | [number, number]; fn: (...args: number[]) => number; angle?: "in" | "out" }> = {
 	sqrt: { arity: 1, fn: Math.sqrt },
 	cbrt: { arity: 1, fn: Math.cbrt },
 	abs: { arity: 1, fn: Math.abs },
-	sin: { arity: 1, fn: Math.sin },
-	cos: { arity: 1, fn: Math.cos },
-	tan: { arity: 1, fn: Math.tan },
-	asin: { arity: 1, fn: Math.asin },
-	acos: { arity: 1, fn: Math.acos },
-	atan: { arity: 1, fn: Math.atan },
-	arcsin: { arity: 1, fn: Math.asin },
-	arccos: { arity: 1, fn: Math.acos },
-	arctan: { arity: 1, fn: Math.atan },
+	// `angle: "in"` functions take an angle; "out" functions return one —
+	// what the degrees setting converts.
+	sin: { arity: 1, fn: Math.sin, angle: "in" },
+	cos: { arity: 1, fn: Math.cos, angle: "in" },
+	tan: { arity: 1, fn: Math.tan, angle: "in" },
+	sec: { arity: 1, fn: (x) => 1 / Math.cos(x), angle: "in" },
+	csc: { arity: 1, fn: (x) => 1 / Math.sin(x), angle: "in" },
+	cot: { arity: 1, fn: (x) => Math.cos(x) / Math.sin(x), angle: "in" },
+	asin: { arity: 1, fn: Math.asin, angle: "out" },
+	acos: { arity: 1, fn: Math.acos, angle: "out" },
+	atan: { arity: 1, fn: Math.atan, angle: "out" },
+	asec: { arity: 1, fn: (x) => Math.acos(1 / x), angle: "out" },
+	acsc: { arity: 1, fn: (x) => Math.asin(1 / x), angle: "out" },
+	acot: { arity: 1, fn: (x) => Math.PI / 2 - Math.atan(x), angle: "out" },
+	arcsin: { arity: 1, fn: Math.asin, angle: "out" },
+	arccos: { arity: 1, fn: Math.acos, angle: "out" },
+	arctan: { arity: 1, fn: Math.atan, angle: "out" },
 	sinh: { arity: 1, fn: Math.sinh },
 	cosh: { arity: 1, fn: Math.cosh },
 	tanh: { arity: 1, fn: Math.tanh },
+	asinh: { arity: 1, fn: Math.asinh },
+	acosh: { arity: 1, fn: Math.acosh },
+	atanh: { arity: 1, fn: Math.atanh },
 	ln: { arity: 1, fn: Math.log },
-	log: { arity: 1, fn: Math.log10 },
+	// log(x) is base 10; log(x, b) is base b.
+	log: { arity: [1, 2], fn: (x, b) => (b === undefined ? Math.log10(x) : Math.log(x) / Math.log(b)) },
+	// root(x, n): the nth root, real for odd n of a negative x.
+	root: { arity: 2, fn: (x, n) => power(x, 1 / n) },
+	factorial: { arity: 1, fn: factorial },
+	gamma: { arity: 1, fn: gamma },
+	ncr: { arity: 2, fn: (n, r) => (wholeAndOrdered(n, r) ? Math.round(factorial(n) / (factorial(r) * factorial(n - r))) : NaN) },
+	npr: { arity: 2, fn: (n, r) => (wholeAndOrdered(n, r) ? Math.round(factorial(n) / factorial(n - r)) : NaN) },
+	// mod takes the sign of the divisor, as in mathematics: mod(-1, 3) is 2.
+	mod: { arity: 2, fn: (a, b) => a - b * Math.floor(a / b) },
+	gcd: { arity: 2, fn: gcd },
+	lcm: { arity: 2, fn: (a, b) => (gcd(a, b) > 0 ? Math.abs(a * b) / gcd(a, b) : a === 0 || b === 0 ? 0 : NaN) },
 	exp: { arity: 1, fn: Math.exp },
 	floor: { arity: 1, fn: Math.floor },
 	ceil: { arity: 1, fn: Math.ceil },
@@ -82,6 +138,12 @@ export function tokenize(source: string): Token[] {
 			i += number[0].length;
 			continue;
 		}
+		// Greek letters are variables (π and θ were already mapped to their names).
+		if (/[α-ωΑ-Ω]/.test(ch)) {
+			tokens.push({ kind: "name", name: ch });
+			i++;
+			continue;
+		}
 		if (/[A-Za-z]/.test(ch)) {
 			const rest = text.slice(i).toLowerCase();
 			const word = WORDS.find((w) => rest.startsWith(w));
@@ -95,7 +157,7 @@ export function tokenize(source: string): Token[] {
 			}
 			continue;
 		}
-		if ("+-*/^(),|[]=<>".includes(ch)) {
+		if ("+-*/^(),|[]=<>!".includes(ch)) {
 			tokens.push({ kind: "op", op: ch });
 			i++;
 			continue;
@@ -173,9 +235,16 @@ class Parser {
 		return this.power();
 	}
 
-	/** power := atom ("^" unary)?  — right-associative, and -x^2 is -(x^2). */
+	/** atom with any trailing "!" — 5!, (n+1)!, x!!. */
+	private postfix(): Expr {
+		let expr = this.atom();
+		while (this.eat("!")) expr = { type: "call", fn: "factorial", args: [expr] };
+		return expr;
+	}
+
+	/** power := postfix ("^" unary)?  — right-associative, and -x^2 is -(x^2). */
 	private power(): Expr {
-		const base = this.atom();
+		const base = this.postfix();
 		if (this.eat("^")) return { type: "bin", op: "^", left: base, right: this.unary() };
 		return base;
 	}
@@ -302,9 +371,21 @@ export function variablesOf(expr: Expr, into = new Set<string>()): Set<string> {
 export type Scope = Record<string, number>;
 export type Compiled = (scope: Scope) => number;
 
+export interface CompileOptions {
+	/** Trig functions take degrees and inverse trig functions return them. */
+	degrees?: boolean;
+}
+
+const DEG = Math.PI / 180;
+
 /** Compile a scalar expression to a function of its variables. Tuples and
  *  matrices are not numbers and are refused here. */
-export function compile(expr: Expr): Compiled {
+export function compile(expr: Expr, options: CompileOptions = {}): Compiled {
+	return compileWith(expr, options);
+}
+
+function compileWith(expr: Expr, options: CompileOptions): Compiled {
+	const compile = (inner: Expr) => compileWith(inner, options);
 	switch (expr.type) {
 		case "num": {
 			const value = expr.value;
@@ -323,7 +404,9 @@ export function compile(expr: Expr): Compiled {
 			return (scope) => -arg(scope);
 		}
 		case "call": {
-			const fn = FUNCTIONS[expr.fn]!.fn;
+			const spec = FUNCTIONS[expr.fn]!;
+			const raw = spec.fn;
+			const fn = !options.degrees || !spec.angle ? raw : spec.angle === "in" ? (x: number) => raw(x * DEG) : (x: number) => raw(x) / DEG;
 			const args = expr.args.map(compile);
 			if (args.length === 1) {
 				const only = args[0]!;

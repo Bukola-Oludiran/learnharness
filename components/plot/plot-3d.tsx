@@ -8,7 +8,7 @@ import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { cn } from "@/lib/utils";
 import {
-	curve3, DEFAULT_BOX, implicitMesh, niceStep, paramSurfaceMesh, PLOT_COLORS, resolvePlot, surfaceMesh, tickLabel, ticks, type Mesh, type PlotBox, type PlotDoc, type Point3,
+	curve3, DEFAULT_BOX, implicitMesh, niceStep, parameterRanges, paramSurfaceMesh, PLOT_COLORS, resolvePlot, surfaceMesh, tickLabel, ticks, type Mesh, type PlotBox, type PlotDoc, type Point3,
 } from "@/src/core";
 import type { PlotCanvasHandle } from "./plot-canvas";
 
@@ -109,7 +109,7 @@ function build(stage: Stage, doc: PlotDoc, width: number, height: number): void 
 	};
 
 	const resolved = resolvePlot(doc);
-	const twoPi = 2 * Math.PI;
+	const ranges = parameterRanges(doc);
 	for (const [index, line] of resolved.lines.entries()) {
 		const source = doc.lines[index]!;
 		if (source.hidden) continue;
@@ -119,13 +119,13 @@ function build(stage: Stage, doc: PlotDoc, width: number, height: number): void 
 				addMesh(surfaceMesh(line.fn, line.axis, resolved.scope, box, SURFACE_SAMPLES), color);
 				break;
 			case "param-surface":
-				addMesh(paramSurfaceMesh(line.x, line.y, line.z, resolved.scope, [doc.uMin ?? 0, doc.uMax ?? twoPi], [doc.vMin ?? 0, doc.vMax ?? twoPi], SURFACE_SAMPLES), color);
+				addMesh(paramSurfaceMesh(line.x, line.y, line.z, resolved.scope, ranges.u, ranges.v, SURFACE_SAMPLES), color);
 				break;
 			case "implicit3":
 				addMesh(implicitMesh(line.fn, resolved.scope, box, IMPLICIT_CELLS), color);
 				break;
 			case "curve3":
-				for (const part of curve3(line.x, line.y, line.z, resolved.scope, doc.tMin ?? 0, doc.tMax ?? twoPi, CURVE_SAMPLES)) addCurve(part, color);
+				for (const part of curve3(line.x, line.y, line.z, resolved.scope, ranges.t[0], ranges.t[1], CURVE_SAMPLES)) addCurve(part, color);
 				break;
 			case "points3":
 				for (const point of line.points) {

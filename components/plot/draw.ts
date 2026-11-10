@@ -1,5 +1,5 @@
 import {
-	PLOT_COLORS, resolvePlot, sampleFunction, sampleImplicit, sampleParametric, samplePolar, tickLabel, ticks, niceStep, type PlotDoc, type PlotView, type Polyline,
+	parameterRanges, PLOT_COLORS, resolvePlot, sampleFunction, sampleImplicit, sampleParametric, samplePolar, tickLabel, ticks, niceStep, type PlotDoc, type PlotView, type Polyline,
 } from "@/src/core";
 
 /**
@@ -67,8 +67,7 @@ export function drawPlot(ctx: CanvasRenderingContext2D, width: number, height: n
 
 	// Curves.
 	const resolved = resolvePlot(doc);
-	const tMin = doc.tMin ?? 0;
-	const tMax = doc.tMax ?? 2 * Math.PI;
+	const [tMin, tMax] = parameterRanges(doc).t;
 	const samples = Math.max(200, Math.min(2000, Math.round(width)));
 	const stroke = (lines: Polyline[], flip = false) => {
 		ctx.beginPath();
@@ -103,7 +102,7 @@ export function drawPlot(ctx: CanvasRenderingContext2D, width: number, height: n
 				stroke(sampleParametric(line.x, line.y, resolved.scope, tMin, tMax, 1200));
 				break;
 			case "polar":
-				stroke(samplePolar(line.fn, resolved.scope, tMin, tMax, 1200));
+				stroke(samplePolar(line.fn, resolved.scope, tMin, tMax, 1200, doc.angles === "degrees"));
 				break;
 			case "implicit": {
 				const segments = sampleImplicit(line.fn, resolved.scope, view, Math.min(220, Math.round(width / 4)), Math.min(220, Math.round(height / 4)));

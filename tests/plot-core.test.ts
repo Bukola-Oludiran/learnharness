@@ -103,7 +103,7 @@ describe("how a line is understood", () => {
 		assert.deepEqual(kinds(["y = sin(x)", "x^2 - 1", "x = y^2", "x^2 + y^2 = 9", "(cos(t), sin(2t))", "r = 1 + cos(theta)", "(1, 2), (3, 4)", "a = 2", "", "y = ax"]), [
 			"explicit-y", "explicit-y", "explicit-x", "implicit", "parametric", "polar", "points", "definition", "empty", "explicit-y",
 		]);
-		assert.deepEqual(kinds(["y = x + y", "x = x^2 + y", "5", "y^2 = x"]), ["implicit", "implicit", "explicit-y", "implicit"]);
+		assert.deepEqual(kinds(["y = x + y", "x = x^2 + y", "5", "y^2 = x", "y = 5"]), ["implicit", "implicit", "value", "implicit", "explicit-y"]);
 	});
 
 	it("lets curves use definitions, whichever line they are on", () => {
@@ -352,5 +352,127 @@ describe("a 3D graph document", () => {
 		assert.equal(graphDocOf({ expressions: ["y = x"], xMin: -2, xMax: 2 }).mode, "2d");
 		// A 3D line on a flat graph comes back to the tutor as unreadable, with the reason.
 		assert.throws(() => graphResultText(graphDocOf({ expressions: ["z = x^2 + y^2"] })), /This uses z, so it needs a 3D graph\./);
+	});
+});
+
+// ── Phase 5c2: the scientific functions, degrees and answers ────────────────
+const { factorial, formatValue, gamma, parameterRanges, samplePolar: polar } = await import("../src/core/plot/index.ts");
+
+describe("the scientific functions", () => {
+	it("covers the reciprocal, inverse and hyperbolic families", () => {
+		near(value("sec(0) + csc(pi/2) + cot(pi/4)"), 3);
+		near(value("asec(2)"), Math.PI / 3);
+		near(value("acsc(2)"), Math.PI / 6);
+		near(value("acot(1)"), Math.PI / 4);
+		near(value("asinh(sinh(1.5)) + acosh(cosh(2)) + atanh(tanh(0.5))"), 4);
+	});
+
+	it("takes logs to any base and nth roots", () => {
+		near(value("log(100)"), 2);
+		near(value("log(8, 2)"), 3);
+		near(value("log(x, b)", { x: 81, b: 3 }), 4);
+		near(value("root(27, 3)"), 3);
+		near(value("root(-32, 5)"), -2);
+		assert.ok(Number.isNaN(value("root(-16, 4)")));
+	});
+
+	it("does factorials, counting and whole-number arithmetic", () => {
+		near(value("5!"), 120);
+		near(value("0!"), 1);
+		near(value("3!!"), 720);
+		near(value("(2 + 1)!"), 6);
+		near(value("2^3!"), 64, "the factorial binds before the power");
+		near(value("n!/(n-2)!", { n: 6 }), 30);
+		assert.equal(value("170!"), factorial(170));
+		assert.equal(value("171!"), Infinity);
+		assert.ok(Number.isNaN(value("(-1)!")));
+		assert.ok(Math.abs(value("0.5!") - Math.sqrt(Math.PI) / 2) < 1e-10, "between whole numbers it is the gamma function");
+		assert.ok(Math.abs(gamma(5) - 24) < 1e-9);
+		near(value("nCr(5, 2)"), 10);
+		near(value("nPr(5, 2)"), 20);
+		near(value("nCr(52, 5)"), 2598960);
+		assert.ok(Number.isNaN(value("nCr(2, 5)")));
+		near(value("mod(7, 3)"), 1);
+		near(value("mod(-1, 3)"), 2);
+		near(value("gcd(12, 18) + lcm(4, 6)"), 18);
+		assert.ok(Number.isNaN(value("gcd(1.5, 3)")));
+	});
+
+	it("treats Greek letters as variables", () => {
+		near(value("αx + β", { α: 2, x: 3, β: 1 }), 7);
+		assert.deepEqual(resolvePlot(doc(["y = λ x", "λ = 3"])).scope, { λ: 3 });
+		assert.equal(errorOf("y = μ x"), '"μ" is not defined. Add a line such as μ = 1.');
+	});
+
+	it("says how many values a function takes", () => {
+		assert.throws(() => parseExpr("root(8)"), /root takes 2 values\./);
+		assert.throws(() => parseExpr("log(1, 2, 3)"), /log takes 1 to 2 values\./);
+		assert.throws(() => parseExpr("!5"), /Unexpected "!"\./);
+	});
+});
+
+describe("degrees", () => {
+	const deg = (source: string) => compile(parseExpr(source), { degrees: true })({});
+
+	it("trig takes degrees and inverse trig answers in them; nothing else changes", () => {
+		near(deg("sin(90)"), 1);
+		near(deg("cos(180)"), -1);
+		near(deg("tan(45)"), 1);
+		near(deg("sec(60)"), 2);
+		near(deg("asin(1)"), 90);
+		near(deg("atan(1)"), 45);
+		near(deg("acot(1)"), 45);
+		near(deg("sinh(1)"), Math.sinh(1));
+		near(deg("pi"), Math.PI);
+		near(value("sin(90)"), Math.sin(90), "radians unless asked");
+	});
+
+	it("is a property of the graph: every line, and the default parameter range", () => {
+		const d = { ...doc(["sin(30)", "y = sin(x)", "r = 1 + cos(theta)"]), angles: "degrees" as const };
+		const resolved = resolvePlot(d);
+		near((resolved.lines[0] as { value: number }).value, 0.5);
+		near((resolved.lines[1] as unknown as { fn: (s: Record<string, number>) => number }).fn({ x: 90 }), 1);
+		assert.deepEqual(parameterRanges(d), { t: [0, 360], u: [0, 360], v: [0, 360] });
+		assert.deepEqual(parameterRanges(doc(["x"])).t, [0, 2 * Math.PI]);
+		assert.deepEqual(parameterRanges({ ...d, tMin: 10, tMax: 20 }).t, [10, 20]);
+		// A polar curve in degrees is the same curve.
+		const r = compile(parseExpr("2"), { degrees: true });
+		const quarter = polar(r, {}, 0, 90, 1, true)[0]!;
+		near(quarter[1]![0], 0);
+		near(quarter[1]![1], 2);
+		assert.equal(cleanPlotDoc({ lines: [], angles: "degrees" })!.angles, "degrees");
+		assert.equal("angles" in cleanPlotDoc({ lines: [], angles: "gradians" })!, false);
+	});
+});
+
+describe("calculation lines", () => {
+	it("a line with no variables is a value, not a curve, in either mode", () => {
+		const line = (text: string, before: string[] = []) => resolvePlot(doc([...before, text])).lines.at(-1)!;
+		assert.deepEqual(line("5!"), { id: "l1", kind: "value", value: 120 });
+		assert.deepEqual(line("2a + 1", ["a = 3"]), { id: "l2", kind: "value", value: 7 });
+		assert.equal(line("x + 1").kind, "explicit-y");
+		assert.equal(resolved3("sqrt(2)^2").kind, "value");
+		assert.equal(resolved3("x y").kind, "surface");
+	});
+
+	it("shows up to ten significant digits, and says when there is no value", () => {
+		assert.equal(formatValue(Math.sin(Math.PI / 3)), "0.8660254038");
+		assert.equal(formatValue(120), "120");
+		assert.equal(formatValue(0.1 + 0.2), "0.3");
+		assert.equal(formatValue(1 / 3), "0.3333333333");
+		assert.equal(formatValue(2.5e15), "2.5e15");
+		assert.equal(formatValue(1.2345e-9), "1.2345e-9");
+		assert.equal(formatValue(-0), "0");
+		assert.equal(formatValue(NaN), "undefined");
+		assert.equal(formatValue(Infinity), "∞");
+		assert.equal(formatValue(-Infinity), "−∞");
+	});
+
+	it("reads to the tutor with its answer, and with the angle unit when in degrees", () => {
+		const d = { ...doc(["sin(30)", "y = cos(x)"]), angles: "degrees" as const };
+		assert.equal(plotOutline(d), "Angles in degrees.\n1. sin(30) (= 0.5)\n2. y = cos(x)\nView: x from -10 to 10, y from -10 to 10");
+		const built = graphDocOf({ expressions: ["y = sin(x)", "α = 2"], angles: "degrees", sliders: [{ name: "α", min: 0, max: 5 }] });
+		assert.deepEqual([built.angles, built.lines[1]], ["degrees", { id: "l2", text: "α = 2", color: 1, min: 0, max: 5 }]);
+		assert.equal("angles" in graphDocOf({ expressions: ["y = x"], angles: "radians" }), false);
 	});
 });
