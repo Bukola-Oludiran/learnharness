@@ -13,7 +13,8 @@ import { cleanPlotDoc, DEFINITION_START, MAX_LINE_CHARS, resolvePlot, type PlotD
  * The record keeps the graph document (`details` → the tool part's output
  * → GraphCard). The tutor's result is text: what was shown, and any line
  * that could not be read. Description approved by the owner, 2026-11-10
- * (the 3D paragraph the same day, phase 5c; the calculus sentence, phase 5c3).
+ * (the 3D paragraph the same day, phase 5c; the calculus sentence, phase 5c3; the
+ * linear algebra paragraph, phase 5d).
  */
 
 export const MAX_GRAPH_EXPRESSIONS = 20;
@@ -112,6 +113,10 @@ export function createGraphTool(): AgentTool<typeof graphInput> {
 				"any equation in x, y and z as an implicit surface (x^2 + y^2 + z^2 = 9, or a plane 2x + y - z = 4); a space curve as (cos(t), sin(t), t); " +
 				"a parametric surface as (u*cos(v), u*sin(v), v), with u and v from 0 to 2π unless you set ranges; and points as (1, 2, 3). " +
 				"The box runs from -5 to 5 on each axis unless you set it.",
+			"For linear algebra, name a vector with v = (2, 1) (three numbers on a 3D graph) and a matrix with A = [[1, 2], [3, 4]], one inner list per row. " +
+				"A named vector is drawn as an arrow from the origin. Then write expressions with them on their own lines: " +
+				"u + v, 2u - v, A v, A B, A^2, A^-1, A^T, dot(u, v), cross(u, v), norm(v), det(A), trace(A), and span(u) or span(u, v). " +
+				"A line that gives a vector is drawn; a line that gives a number or a matrix shows its value.",
 			"Use it when seeing the curve teaches something: how a parameter changes a shape, where two curves meet, what a transformation does. " +
 				"The result names any expression that could not be read; fix it and call again.",
 		].join("\n\n"),

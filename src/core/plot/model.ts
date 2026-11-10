@@ -14,12 +14,19 @@
  * equation in x, y and z), a space curve (`(x(t), y(t), z(t))`), a
  * parametric surface (the same in u and v), or points (`(1, 2, 3)`).
  *
+ * Linear algebra (phase 5d): `v = (2, 1)` names a vector, drawn as an arrow
+ * from the origin (an unnamed `(2, 1)` stays a point), and `A = [[1, 2],
+ * [3, 4]]` names a matrix. A line built from them (`u + v`, `A v`,
+ * `det(A)`) is evaluated by linalg.ts: a vector is drawn, a number or a
+ * matrix is shown as its value. `span(u, v)` draws what the vectors span.
+ *
  * The document records its mode and each resolved line its kind, so new
  * kinds extend the format. The same line can mean different things in the
  * two modes: `x^2 + y^2 = 4` is a circle in 2D and a cylinder in 3D.
  */
 
-import { compile as compileExpr, ExprError, parseTokens, splitEquation, tokenize, variablesOf, type Compiled, type Expr, type Scope, type UserFunction } from "./expr.ts";
+import { compile as compileExpr, ExprError, isConstantName, parseTokens, splitEquation, tokenize, variablesOf, type Compiled, type Expr, type Scope, type UserFunction } from "./expr.ts";
+import { evaluate, formatEntry, involvesLinear, isMatrix, spanBasis, withTranspose, type LinearEnv, type Matrix, type Value, type Vector } from "./linalg.ts";
 
 export interface PlotView {
 	xMin: number;
@@ -97,6 +104,13 @@ export type ResolvedLine =
 	| { id: string; kind: "curve3"; x: Compiled; y: Compiled; z: Compiled }
 	| { id: string; kind: "param-surface"; x: Compiled; y: Compiled; z: Compiled }
 	| { id: string; kind: "points3"; points: [number, number, number][] }
+	/** A vector (phase 5d): an arrow from the origin when its size fits the graph. `literal` — the line
+	 *  spells its numbers out, so its value need not be shown; `draggable` — its tip can be moved on a
+	 *  2D graph; `guide` — for a sum, the first vector, from whose tip the second is drawn dashed. */
+	| { id: string; kind: "vector"; name?: string; value: Vector; literal: boolean; draggable: boolean; guide?: { from: Vector } }
+	| { id: string; kind: "matrix"; name?: string; value: Matrix; literal: boolean }
+	/** What vectors span: `basis` is orthonormal (one vector: a line; two in 3D: a plane); `note` says it in words. */
+	| { id: string; kind: "span"; basis: Vector[]; note: string }
 	/** A function definition that is not itself drawn (f(t) = … on a 2D graph still defines f). */
 	| { id: string; kind: "function"; name: string; params: string[] }
 	/** A line with no variables: a calculation, shown as its value and not drawn. */
@@ -125,18 +139,34 @@ const RESERVED_3D = new Set(["x", "y", "z", "t", "u", "v", "theta"]);
 
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
 /** A line understood but not yet evaluated: points still hold their coordinate expressions. */
+type Settled = DistributiveOmit<ResolvedLine, "id">;
+type ValueOf = (scope: Scope) => Value;
+/** A line of vectors and matrices, before its value is known: it may turn out a number, a vector or a matrix. */
+interface LinearDraft {
+	kind: "linear";
+	name?: string;
+	literal: boolean;
+	value: ValueOf;
+	/** The first operand of a top-level sum. */
+	first?: ValueOf;
+}
 type Draft =
-	| DistributiveOmit<Exclude<ResolvedLine, { kind: "points" | "points3" | "value" }>, "id">
+	| DistributiveOmit<Exclude<ResolvedLine, { kind: "points" | "points3" | "value" | "vector" | "matrix" | "span" }>, "id">
 	| { kind: "value"; fn: Compiled }
 	| { kind: "points"; fns: [Compiled, Compiled][] }
-	| { kind: "points3"; fns: [Compiled, Compiled, Compiled][] };
-type Classified = { line: Draft; define?: { name: string; fn: Compiled } };
+	| { kind: "points3"; fns: [Compiled, Compiled, Compiled][] }
+	| LinearDraft
+	| { kind: "span-of"; vectors: ValueOf[] };
+type Classified = { line: Draft; define?: { name: string; value: ValueOf } };
 
 /** The graph's own functions: the names (known before any body is parsed,
  *  so f(…) reads as a call everywhere) and the table bodies are compiled against. */
 interface FunctionContext {
 	names: ReadonlySet<string>;
 	table: Record<string, UserFunction>;
+	/** The graph's named vectors and matrices, filled as their definitions are evaluated. */
+	values: Record<string, Value>;
+	cache: WeakMap<object, Compiled>;
 }
 
 /** A line that starts like a function definition: f(x) = or g(x, y) =. */
@@ -154,8 +184,21 @@ export function functionHeader(text: string): { name: string; params: string[] }
 
 function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode, degrees: boolean, fns: FunctionContext): Classified {
 	const RESERVED = mode === "3d" ? RESERVED_3D : RESERVED_2D;
-	const compile = (expr: Expr) => compileExpr(expr, { degrees, functions: fns.table });
-	const parse = (list: ReturnType<typeof tokenize>) => parseTokens(list, fns.names);
+	const env: LinearEnv = { values: fns.values, options: { degrees, functions: fns.table }, cache: fns.cache };
+	const linear = (expr: Expr) => involvesLinear(expr, (name) => Object.hasOwn(fns.values, name));
+	// A number built from vectors (y = norm(v) x) is evaluated by linalg.ts; anything that is not a number there is undefined.
+	const compile = (expr: Expr): Compiled => {
+		if (!linear(expr)) return compileExpr(expr, env.options);
+		return (scope) => {
+			try {
+				const value = evaluate(expr, scope, env);
+				return typeof value === "number" ? value : NaN;
+			} catch {
+				return NaN;
+			}
+		};
+	};
+	const parse = (list: ReturnType<typeof tokenize>) => parseTokens(list, fns.names).map((expr) => withTranspose(expr, (name) => defined.has(name)));
 	const tokens = tokenize(text);
 	if (tokens.length === 0) return { line: { kind: "empty" } };
 	const sides = splitEquation(tokens);
@@ -175,7 +218,32 @@ function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode, de
 	const definition = (name: string, right: Expr): Classified => {
 		if (defined.has(name)) throw new ExprError(`"${name}" is already defined above.`);
 		check(right, []);
-		return { line: { kind: "definition", name, value: NaN, slider: right.type === "num" || (right.type === "neg" && right.arg.type === "num") }, define: { name, fn: compile(right) } };
+		return { line: { kind: "definition", name, value: NaN, slider: right.type === "num" || (right.type === "neg" && right.arg.type === "num") }, define: { name, value: compile(right) } };
+	};
+	// Vectors and matrices. A line of them has no coordinate in it: it is one value, not a curve.
+	const isConstant = (expr: Expr) => {
+		const vars = variablesOf(expr);
+		return !vars.has("x") && !vars.has("y") && !vars.has("z");
+	};
+	const isNumeral = (expr: Expr) => expr.type === "num" || (expr.type === "neg" && expr.arg.type === "num");
+	const valueLine = (expr: Expr, name?: string): Draft => {
+		check(expr, []);
+		if (!name && expr.type === "call" && expr.fn === "span") return { kind: "span-of", vectors: expr.args.map((arg) => (scope: Scope) => evaluate(arg, scope, env)) };
+		const literal = (expr.type === "tuple" && expr.items.every(isNumeral)) || (expr.type === "matrix" && expr.rows.every((row) => row.every(isNumeral)));
+		const sum = expr.type === "bin" && expr.op === "+" ? expr.left : null;
+		return { kind: "linear", ...(name ? { name } : {}), literal, value: (scope) => evaluate(expr, scope, env), ...(sum ? { first: (scope: Scope) => evaluate(sum, scope, env) } : {}) };
+	};
+	/** v = (2, 1), A = [[1, 2], [3, 4]], w = u + v: a name for a vector, a matrix, or a number worked out from them.
+	 *  In 3D u and v may be named too; while a surface is sampled its own u and v take over. */
+	const valueDefinition = (leftList: Expr[], rightList: Expr[]): Classified | null => {
+		const left = leftList.length === 1 ? leftList[0]! : null;
+		const right = rightList.length === 1 ? rightList[0]! : null;
+		if (left?.type !== "var" || !right || !(right.type === "tuple" || linear(right)) || !isConstant(right)) return null;
+		const name = left.name;
+		if ((RESERVED.has(name) && !(mode === "3d" && (name === "u" || name === "v"))) || isConstantName(name)) return null;
+		if (defined.has(name)) throw new ExprError(`"${name}" is already defined above.`);
+		const line = valueLine(right, name) as LinearDraft;
+		return { line, define: { name, value: line.value } };
 	};
 	// f(x) = …: a function definition. On a flat graph a function of one
 	// variable is also drawn as y = f(x); in 3D one of two variables as z = f(x, y).
@@ -199,7 +267,7 @@ function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode, de
 
 	if (!sides) {
 		const list = parse(tokens);
-		if (list.some((item) => item.type === "matrix")) throw new ExprError("Matrices arrive in a later version of the grapher.");
+		if (list.length === 1 && list[0]!.type !== "tuple" && linear(list[0]!) && isConstant(list[0]!)) return { line: valueLine(list[0]!) };
 		if (list.every((item) => item.type === "tuple")) {
 			const tuples = list as Extract<Expr, { type: "tuple" }>[];
 			if (tuples.some((tuple) => tuple.items.length === 3)) throw new ModeError("A point with three coordinates needs a 3D graph.", "3d");
@@ -223,8 +291,12 @@ function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode, de
 	}
 
 	if (sides.left.length === 0 || sides.right.length === 0) throw new ExprError("Something is missing on one side of =.");
-	const left = scalar(parse(sides.left));
-	const right = scalar(parse(sides.right));
+	const leftList = parse(sides.left);
+	const rightList = parse(sides.right);
+	const named = valueDefinition(leftList, rightList);
+	if (named) return named;
+	const left = scalar(leftList);
+	const right = scalar(rightList);
 	const rightVars = variablesOf(right);
 	if (variablesOf(left).has("z") || rightVars.has("z")) throw new ModeError("This uses z, so it needs a 3D graph.", "3d");
 	if (left.type === "call") throw new ExprError("Write this as y = … (function definitions like f(x) = … are not supported yet).");
@@ -253,7 +325,7 @@ function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode, de
 	function classify3d(): Classified {
 		if (!sides) {
 			const list = parse(tokens);
-			if (list.some((item) => item.type === "matrix")) throw new ExprError("Matrices arrive in a later version of the grapher.");
+			if (list.length === 1 && list[0]!.type !== "tuple" && linear(list[0]!) && isConstant(list[0]!)) return { line: valueLine(list[0]!) };
 			if (list.every((item) => item.type === "tuple")) {
 				const tuples = list as Extract<Expr, { type: "tuple" }>[];
 				if (tuples.some((tuple) => tuple.items.length === 2)) throw new ModeError("A point with two coordinates belongs on a 2D graph; here a point needs three.", "2d");
@@ -281,8 +353,12 @@ function classify(text: string, defined: ReadonlySet<string>, mode: PlotMode, de
 			return { line: { kind: "surface", axis: "z", fn: compile(expr) } };
 		}
 		if (sides.left.length === 0 || sides.right.length === 0) throw new ExprError("Something is missing on one side of =.");
-		const left = scalar(parse(sides.left));
-		const right = scalar(parse(sides.right));
+		const leftList = parse(sides.left);
+		const rightList = parse(sides.right);
+		const named = valueDefinition(leftList, rightList);
+		if (named) return named;
+		const left = scalar(leftList);
+		const right = scalar(rightList);
 		const rightVars = variablesOf(right);
 		if (left.type === "var") {
 			const name = left.name;
@@ -329,7 +405,7 @@ export function resolvePlot(doc: Pick<PlotDoc, "lines"> & { mode?: PlotMode }): 
 		if (names.has(header.name)) duplicates.add(line.id);
 		else names.add(header.name);
 	}
-	const fns: FunctionContext = { names, table: {} };
+	const fns: FunctionContext = { names, table: {}, values: {}, cache: new WeakMap() };
 	for (const line of doc.lines) {
 		const header = functionHeader(line.text);
 		if (!header || duplicates.has(line.id) || line.problem) continue;
@@ -342,8 +418,8 @@ export function resolvePlot(doc: Pick<PlotDoc, "lines"> & { mode?: PlotMode }): 
 			// the line reports its own error when it is classified below
 		}
 	}
-	// Definitions next, in order, so a curve may use a slider written below it.
-	const drafts = new Map<string, Classified | { error: string; fix?: PlotMode }>();
+	// Definitions next, so a curve may use a slider written below it.
+	const settled = new Map<string, Settled>();
 	const tryClassify = (line: PlotLine): Classified | { error: string; fix?: PlotMode } => {
 		if (line.problem) return { error: line.problem };
 		if (duplicates.has(line.id)) return { error: `"${functionHeader(line.text)!.name}" is already defined above.` };
@@ -354,25 +430,96 @@ export function resolvePlot(doc: Pick<PlotDoc, "lines"> & { mode?: PlotMode }): 
 			return { error: error instanceof ExprError ? error.message : "This could not be read." };
 		}
 	};
-	for (const line of doc.lines) {
-		if (!DEFINITION_START.test(line.text) || functionHeader(line.text)) continue;
-		const draft = tryClassify(line);
-		if ("error" in draft || !draft.define) continue;
-		const value = draft.define.fn(scope);
-		scope[draft.define.name] = value;
-		defined.add(draft.define.name);
-		if (draft.line.kind === "definition") drafts.set(line.id, { line: { ...draft.line, value } });
+	// Round after round until nothing more settles: a definition may use one written below it.
+	const pending = doc.lines.filter((line) => DEFINITION_START.test(line.text) && !functionHeader(line.text));
+	for (let progress = true; progress && pending.length > 0; ) {
+		progress = false;
+		for (const line of [...pending]) {
+			const draft = tryClassify(line);
+			if ("error" in draft || !draft.define) continue;
+			let value: Value;
+			try {
+				value = draft.define.value(scope);
+			} catch {
+				continue; // the line reports its own error below
+			}
+			if (typeof value === "number") scope[draft.define.name] = value;
+			else fns.values[draft.define.name] = value;
+			defined.add(draft.define.name);
+			if (draft.line.kind === "definition") settled.set(line.id, { ...draft.line, value: value as number });
+			else if (draft.line.kind === "linear") settled.set(line.id, settleLinear(draft.line, value, scope, mode));
+			pending.splice(pending.indexOf(line), 1);
+			progress = true;
+		}
 	}
+	const failure = (error: unknown): Settled => ({ kind: "error", error: error instanceof ExprError ? error.message : "This could not be read." });
 	const lines: ResolvedLine[] = doc.lines.map((line) => {
-		const draft = drafts.get(line.id) ?? tryClassify(line);
+		const done = settled.get(line.id);
+		if (done) return { id: line.id, ...done };
+		const draft = tryClassify(line);
 		if ("error" in draft) return { id: line.id, kind: "error", error: draft.error, ...(draft.fix ? { fix: draft.fix } : {}) };
+		if (draft.line.kind === "linear" || draft.line.kind === "span-of") {
+			try {
+				if (draft.line.kind === "span-of") return { id: line.id, ...settleSpan(draft.line.vectors.map((vector) => vector(scope)), mode) };
+				const value = draft.line.value(scope);
+				// A definition that reaches here never settled above.
+				if (draft.define) return { id: line.id, kind: "error", error: "This definition could not be used." };
+				return { id: line.id, ...settleLinear(draft.line, value, scope, mode) };
+			} catch (error) {
+				return { id: line.id, ...failure(error) };
+			}
+		}
 		if (draft.line.kind === "points") return { id: line.id, kind: "points", points: draft.line.fns.map(([x, y]) => [x(scope), y(scope)]) };
 		if (draft.line.kind === "value") return { id: line.id, kind: "value", value: draft.line.fn(scope) };
 		if (draft.line.kind === "points3") return { id: line.id, kind: "points3", points: draft.line.fns.map(([x, y, z]) => [x(scope), y(scope), z(scope)]) };
-		if (draft.line.kind === "definition" && !drafts.has(line.id)) return { id: line.id, kind: "error", error: "This definition could not be used." };
+		if (draft.line.kind === "definition") return { id: line.id, kind: "error", error: "This definition could not be used." };
 		return { id: line.id, ...draft.line };
 	});
 	return { lines, scope, costly: new Set(doc.lines.filter((line) => COSTLY.test(line.text)).map((line) => line.id)) };
+}
+
+/** A vector's entries must match the graph for it to be drawn; one made for the other mode says so. */
+function sizeProblem(size: number, mode: PlotMode, what: string): Settled | null {
+	if (mode === "2d" && size === 3) return { kind: "error", error: `${what} with three entries needs a 3D graph.`, fix: "3d" };
+	if (mode === "3d" && size === 2) return { kind: "error", error: `${what} with two entries belongs on a 2D graph.`, fix: "2d" };
+	return null;
+}
+
+/** What a line of vectors and matrices turned out to be. */
+function settleLinear(draft: LinearDraft, value: Value, scope: Scope, mode: PlotMode): Settled {
+	const name = draft.name ? { name: draft.name } : {};
+	if (typeof value === "number") return draft.name ? { kind: "definition", name: draft.name, value, slider: false } : { kind: "value", value };
+	if (isMatrix(value)) return { kind: "matrix", ...name, value, literal: draft.literal };
+	const problem = sizeProblem(value.length, mode, "A vector");
+	if (problem) return problem;
+	let guide: { from: Vector } | undefined;
+	try {
+		const first = draft.first?.(scope);
+		if (first !== undefined && typeof first !== "number" && !isMatrix(first) && first.length === value.length) guide = { from: first };
+	} catch {
+		// no guide
+	}
+	return { kind: "vector", ...name, value, literal: draft.literal, draggable: draft.literal && draft.name !== undefined && mode === "2d" && value.length === 2, ...(guide ? { guide } : {}) };
+}
+
+function settleSpan(values: Value[], mode: PlotMode): Settled {
+	const vectors = values.filter((value): value is Vector => typeof value !== "number" && !isMatrix(value));
+	if (vectors.length !== values.length) throw new ExprError("span needs vectors, such as span(u, v).");
+	const size = vectors[0]!.length;
+	if (vectors.some((vector) => vector.length !== size)) throw new ExprError("span needs vectors of the same size.");
+	const problem = sizeProblem(size, mode, "A span of vectors");
+	if (problem) return problem;
+	if (size !== 2 && size !== 3) throw new ExprError("span is drawn for vectors with two or three entries.");
+	const basis = spanBasis(vectors);
+	const note = basis.length === 0 ? "only the origin" : basis.length === 1 ? "a line through the origin" : basis.length === size ? (size === 2 ? "the whole plane" : "all of 3D space") : "a plane through the origin";
+	return { kind: "span", basis, note };
+}
+
+/** A result as text: -2, (3, 4), [[7, 10], [15, 22]]. */
+export function formatResult(value: Value): string {
+	if (typeof value === "number") return formatValue(value);
+	if (isMatrix(value)) return `[${value.map((row) => `[${row.map(formatEntry).join(", ")}]`).join(", ")}]`;
+	return `(${value.map(formatEntry).join(", ")})`;
 }
 
 const fmt = (value: number) => (Number.isFinite(value) ? String(Math.round(value * 1e4) / 1e4) : String(value));
@@ -397,6 +544,14 @@ export function parameterRanges(doc: PlotDoc): { t: [number, number]; u: [number
 export function withoutTypeset(line: PlotLine): PlotLine {
 	const { latex: _latex, problem: _problem, ...rest } = line;
 	return rest;
+}
+
+/** Replace a named vector's numbers (its tip was dragged). */
+export function withVectorValue(doc: PlotDoc, lineId: string, value: readonly number[]): PlotDoc {
+	return {
+		...doc,
+		lines: doc.lines.map((line) => (line.id === lineId ? { ...withoutTypeset(line), text: line.text.replace(/=.*$/, `= (${value.map(formatEntry).join(", ")})`) } : line)),
+	};
 }
 
 /** Replace a definition line's number (a dragged slider). */
@@ -497,7 +652,9 @@ export function plotOutline(doc: PlotDoc): string {
 		const meaning = resolved.lines[index]!;
 		const notes: string[] = [];
 		if (meaning.kind === "definition" && meaning.slider) notes.push(`slider, from ${fmt(line.min ?? DEFAULT_SLIDER.min)} to ${fmt(line.max ?? DEFAULT_SLIDER.max)}`);
-		if (meaning.kind === "value") notes.push(`= ${formatValue(meaning.value)}`);
+		if (meaning.kind === "value" || (meaning.kind === "definition" && !meaning.slider)) notes.push(`= ${formatValue(meaning.value)}`);
+		if ((meaning.kind === "vector" || meaning.kind === "matrix") && !meaning.literal) notes.push(`= ${formatResult(meaning.value)}`);
+		if (meaning.kind === "span") notes.push(`= ${meaning.note}`);
 		if (meaning.kind === "error") notes.push(`could not be read: ${meaning.error}`);
 		if (line.hidden) notes.push("hidden");
 		rows.push(`${rows.length + 1}. ${line.text.trim()}${notes.length > 0 ? ` (${notes.join("; ")})` : ""}`);

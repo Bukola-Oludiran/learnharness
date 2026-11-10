@@ -16,15 +16,19 @@
  *                         second argument is a variable bound inside the first
  *   f(2), f(x - 1), f'(x) a call to a function the graph defines (f(x) = …);
  *                         only letters the caller names as functions are read so
- *   (1, 2), [[1,2],[3,4]] tuples and matrices (points now; vectors and
- *                         matrices in later phases)
+ *   (1, 2), [[1,2],[3,4]] tuples and matrices: points, vectors and matrices.
+ *                         Their arithmetic (u + v, A v, det(A), u × v) is
+ *                         evaluated by core/plot/linalg.ts (phase 5d); this
+ *                         file only parses it. × between two vectors is the
+ *                         cross product, so the parser keeps it apart from *.
  */
 
 export type Expr =
 	| { type: "num"; value: number }
 	| { type: "var"; name: string }
 	| { type: "call"; fn: string; args: Expr[] }
-	| { type: "bin"; op: "+" | "-" | "*" | "/" | "^"; left: Expr; right: Expr }
+	/** `cross` marks a product written with ×: the cross product between vectors, plain multiplication between numbers. */
+	| { type: "bin"; op: "+" | "-" | "*" | "/" | "^"; left: Expr; right: Expr; cross?: true }
 	| { type: "neg"; arg: Expr }
 	/** int / deriv / sum / prod: `variable` is bound inside `body`. Limits are absent for deriv. */
 	| { type: "binder"; op: BinderOp; body: Expr; variable: string; lower?: Expr; upper?: Expr }
@@ -119,13 +123,26 @@ const FUNCTIONS: Record<string, { arity: number | [number, number]; fn: (...args
 	min: { arity: [1, 8], fn: Math.min },
 	max: { arity: [1, 8], fn: Math.max },
 };
+/** Functions of vectors and matrices (phase 5d), by how many values each takes. Evaluated in linalg.ts. */
+const LINEAR_FUNCTIONS: Record<string, number | [number, number]> = { dot: 2, cross: 2, norm: 1, det: 1, trace: 1, transpose: 1, inv: 1, span: [1, 3] };
 const CONSTANTS: Record<string, number> = { pi: Math.PI, e: Math.E };
+const DEG = Math.PI / 180;
 /** Multi-letter names that are variables, not products of letters. */
 const NAMED_VARIABLES = ["theta"];
-const WORDS = [...Object.keys(FUNCTIONS), ...BINDERS, ...Object.keys(CONSTANTS), ...NAMED_VARIABLES].sort((a, b) => b.length - a.length);
+const WORDS = [...Object.keys(FUNCTIONS), ...Object.keys(LINEAR_FUNCTIONS), ...BINDERS, ...Object.keys(CONSTANTS), ...NAMED_VARIABLES].sort((a, b) => b.length - a.length);
 
-export const isFunctionName = (name: string) => Object.hasOwn(FUNCTIONS, name);
+export const isLinearFunction = (name: string) => Object.hasOwn(LINEAR_FUNCTIONS, name);
+export const isFunctionName = (name: string) => Object.hasOwn(FUNCTIONS, name) || isLinearFunction(name);
 export const isConstantName = (name: string) => Object.hasOwn(CONSTANTS, name);
+export const constantValue = (name: string): number => CONSTANTS[name] ?? NaN;
+
+/** One of the number functions applied to numbers (what the vector evaluator calls for sin, sqrt and the rest). */
+export function applyFunction(name: string, args: number[], degrees = false): number {
+	const spec = FUNCTIONS[name];
+	if (!spec) return NaN;
+	if (!degrees || !spec.angle) return spec.fn(...args);
+	return spec.angle === "in" ? spec.fn(args[0]! * DEG) : spec.fn(...args) / DEG;
+}
 
 type Token =
 	| { kind: "num"; value: number }
@@ -133,7 +150,7 @@ type Token =
 	| { kind: "op"; op: string };
 
 const SYMBOLS: Record<string, string> = {
-	"×": "*", "·": "*", "⋅": "*", "÷": "/", "−": "-", "–": "-", "π": "pi", "θ": "theta", "√": "sqrt",
+	"·": "*", "⋅": "*", "÷": "/", "−": "-", "–": "-", "π": "pi", "θ": "theta", "√": "sqrt",
 	"∫": "int", "Σ": "sum", "∑": "sum", "Π": "prod", "∏": "prod", "′": "'", "’": "'",
 };
 
@@ -164,7 +181,8 @@ export function tokenize(source: string): Token[] {
 			const rest = text.slice(i).toLowerCase();
 			const word = WORDS.find((w) => rest.startsWith(w));
 			// A known word wins only where it starts; otherwise one letter is one variable.
-			if (word) {
+			// A capital E is a name (a matrix, say), not the constant e.
+			if (word && !(word === "e" && ch === "E")) {
 				tokens.push({ kind: "name", name: word });
 				i += word.length;
 			} else {
@@ -173,7 +191,7 @@ export function tokenize(source: string): Token[] {
 			}
 			continue;
 		}
-		if ("+-*/^(),|[]=<>!'".includes(ch)) {
+		if ("+-*/^(),|[]=<>!'×".includes(ch)) {
 			tokens.push({ kind: "op", op: ch });
 			i++;
 			continue;
@@ -236,6 +254,7 @@ class Parser {
 		for (;;) {
 			if (this.eat("*")) left = { type: "bin", op: "*", left, right: this.unary() };
 			else if (this.eat("/")) left = { type: "bin", op: "/", left, right: this.unary() };
+			else if (this.eat("×")) left = { type: "bin", op: "*", left, right: this.unary(), cross: true };
 			else if (this.startsFactor()) left = { type: "bin", op: "*", left, right: this.power() };
 			else return left;
 		}
@@ -359,7 +378,7 @@ class Parser {
 			}
 			args = [product];
 		}
-		const arity = FUNCTIONS[fn]!.arity;
+		const arity = LINEAR_FUNCTIONS[fn] ?? FUNCTIONS[fn]!.arity;
 		const [min, max] = typeof arity === "number" ? [arity, arity] : arity;
 		if (args.length < min || args.length > max) throw new ExprError(`${fn} takes ${min === max ? min : `${min} to ${max}`} ${max === 1 ? "value" : "values"}.`);
 		return { type: "call", fn, args };
@@ -497,8 +516,6 @@ export function differentiate(f: (x: number) => number, x: number): number {
 	return (4 * d(h / 2) - d(h)) / 3;
 }
 
-const DEG = Math.PI / 180;
-
 /** Compile a scalar expression to a function of its variables. Tuples and
  *  matrices are not numbers and are refused here. */
 export function compile(expr: Expr, options: CompileOptions = {}): Compiled {
@@ -547,6 +564,7 @@ function compileWith(expr: Expr, options: CompileOptions): Compiled {
 			return (scope) => -arg(scope);
 		}
 		case "call": {
+			if (isLinearFunction(expr.fn)) throw new ExprError(`${expr.fn} works on vectors and matrices and cannot be used here.`);
 			const spec = FUNCTIONS[expr.fn]!;
 			const raw = spec.fn;
 			const fn = !options.degrees || !spec.angle ? raw : spec.angle === "in" ? (x: number) => raw(x * DEG) : (x: number) => raw(x) / DEG;
@@ -639,7 +657,7 @@ function compileWith(expr: Expr, options: CompileOptions): Compiled {
 }
 
 /** x^y with real odd roots of negatives: (-8)^(1/3) is -2, as a learner expects, not NaN. */
-function power(base: number, exponent: number): number {
+export function power(base: number, exponent: number): number {
 	if (base >= 0 || Number.isInteger(exponent)) return Math.pow(base, exponent);
 	const denominator = Math.round(1 / exponent);
 	if (Math.abs(1 / denominator - exponent) < 1e-12 && Math.abs(denominator) % 2 === 1) return -Math.pow(-base, exponent);

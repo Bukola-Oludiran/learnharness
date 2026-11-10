@@ -18,6 +18,16 @@ export interface PlotTheme {
 export const DARK_THEME: PlotTheme = { background: "#121212", grid: "rgba(255,255,255,0.09)", axis: "rgba(255,255,255,0.55)", label: "rgba(255,255,255,0.6)" };
 export const LIGHT_THEME: PlotTheme = { background: "#ffffff", grid: "rgba(0,0,0,0.1)", axis: "rgba(0,0,0,0.7)", label: "rgba(0,0,0,0.65)" };
 
+/** How close to a vector's tip, in pixels, a press must be to take hold of it. */
+export const TIP_REACH = 12;
+const HEAD = 11;
+
+/** The label a vector carries at its tip: its name, or a short expression as written. */
+export function vectorLabel(name: string | undefined, text: string): string {
+	const written = text.trim();
+	return name ?? (written.length <= 14 ? written : "");
+}
+
 export function drawPlot(ctx: CanvasRenderingContext2D, width: number, height: number, doc: PlotDoc, view: PlotView, theme: PlotTheme): void {
 	const sx = width / (view.xMax - view.xMin);
 	const sy = height / (view.yMax - view.yMin);
@@ -82,6 +92,32 @@ export function drawPlot(ctx: CanvasRenderingContext2D, width: number, height: n
 		}
 		ctx.stroke();
 	};
+	/** An arrow between two pixel positions, in the current colour. */
+	const arrow = (fromX: number, fromY: number, toX: number, toY: number, head: number) => {
+		const length = Math.hypot(toX - fromX, toY - fromY);
+		if (length < 1) {
+			ctx.beginPath();
+			ctx.arc(toX, toY, 3, 0, 2 * Math.PI);
+			ctx.fill();
+			return;
+		}
+		const [ux, uy] = [(toX - fromX) / length, (toY - fromY) / length];
+		const size = Math.min(head, length);
+		// The shaft stops inside the head, so the tip stays sharp.
+		ctx.beginPath();
+		ctx.moveTo(fromX, fromY);
+		ctx.lineTo(toX - ux * size * 0.8, toY - uy * size * 0.8);
+		ctx.stroke();
+		ctx.save();
+		ctx.setLineDash([]);
+		ctx.beginPath();
+		ctx.moveTo(toX, toY);
+		ctx.lineTo(toX - ux * size - uy * size * 0.42, toY - uy * size + ux * size * 0.42);
+		ctx.lineTo(toX - ux * size + uy * size * 0.42, toY - uy * size - ux * size * 0.42);
+		ctx.closePath();
+		ctx.fill();
+		ctx.restore();
+	};
 	ctx.lineJoin = "round";
 	ctx.lineCap = "round";
 	ctx.lineWidth = 2.25;
@@ -124,6 +160,52 @@ export function drawPlot(ctx: CanvasRenderingContext2D, width: number, height: n
 					ctx.fill();
 				}
 				break;
+			case "vector": {
+				const [x, y] = line.value;
+				if (line.value.length !== 2 || !Number.isFinite(x) || !Number.isFinite(y)) break;
+				// A sum: the second vector again, dashed, from the first one's tip.
+				if (line.guide && line.guide.from.every(Number.isFinite)) {
+					ctx.save();
+					ctx.globalAlpha = 0.7;
+					ctx.lineWidth = 1.5;
+					ctx.setLineDash([6, 5]);
+					arrow(px(line.guide.from[0]!), py(line.guide.from[1]!), px(x!), py(y!), 8);
+					ctx.restore();
+				}
+				arrow(px(0), py(0), px(x!), py(y!), HEAD);
+				if (line.draggable) {
+					// A ring at the tip: this one can be dragged.
+					ctx.save();
+					ctx.lineWidth = 1.5;
+					ctx.globalAlpha = 0.55;
+					ctx.beginPath();
+					ctx.arc(px(x!), py(y!), 7.5, 0, 2 * Math.PI);
+					ctx.stroke();
+					ctx.restore();
+				}
+				const label = vectorLabel(line.name, source.text);
+				if (label) {
+					ctx.font = "600 13px ui-monospace, SFMono-Regular, Menlo, monospace";
+					ctx.textAlign = x! < 0 ? "right" : "left";
+					ctx.fillText(label, px(x!) + (x! < 0 ? -11 : 11), py(y!) + (y! < 0 ? 16 : -9));
+				}
+				break;
+			}
+			case "span": {
+				// One direction: the whole line through the origin. Two fill the plane, which needs no drawing.
+				const [dx, dy] = line.basis[0] ?? [];
+				if (line.basis.length !== 1 || dx === undefined || dy === undefined) break;
+				const reach = Math.hypot(view.xMax - view.xMin, view.yMax - view.yMin) + Math.hypot(view.xMin + view.xMax, view.yMin + view.yMax);
+				ctx.save();
+				ctx.globalAlpha = 0.6;
+				ctx.lineWidth = 1.75;
+				ctx.beginPath();
+				ctx.moveTo(px(-dx * reach), py(-dy * reach));
+				ctx.lineTo(px(dx * reach), py(dy * reach));
+				ctx.stroke();
+				ctx.restore();
+				break;
+			}
 			default:
 				break;
 		}
