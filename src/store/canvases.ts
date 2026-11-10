@@ -1,20 +1,23 @@
 /**
  * CanvasStore — the fs adapter (data/canvases/<chatId>/): for each drawing,
- * <snapshotId>.excalidraw (the scene) and <snapshotId>.outline.txt. Same
- * idioms as the other fork stores: sync fs, id-guarded paths, atomic writes.
+ * <snapshotId>.excalidraw (the scene); for each graph (phase 5b),
+ * <snapshotId>.plot.json; and beside either, <snapshotId>.outline.txt.
+ * Same idioms as the other fork stores: sync fs, id-guarded paths, atomic
+ * writes.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { PATHS } from "../../config.ts";
-import type { CanvasSummary } from "../core/canvas.ts";
+import type { CanvasKind, CanvasSummary } from "../core/canvas.ts";
 import type { CanvasStore } from "../core/ports.ts";
 import { writeFileAtomicSync } from "./atomic-write.ts";
 
 const CHAT_ID = /^[A-Za-z0-9_-]+$/;
 const SNAPSHOT_ID = /^[a-f0-9]{64}$/;
-const SCENE_NAME = /^([a-f0-9]{64})\.excalidraw$/;
-const OUTLINE_NAME = /^([a-f0-9]{64})\.outline\.txt$/;
+const EXTENSION: Record<CanvasKind, string> = { drawing: "excalidraw", plot: "plot.json" };
+const SCENE_NAME = /^([a-f0-9]{64})\.(excalidraw|plot\.json)$/;
+const kindOf = (extension: string): CanvasKind => (extension === "excalidraw" ? "drawing" : "plot");
 
 function chatDir(chatId: string): string {
 	if (!CHAT_ID.test(chatId)) throw new Error(`Invalid chat id: ${chatId}`);
@@ -25,29 +28,32 @@ function guard(snapshotId: string): string {
 	return snapshotId;
 }
 
-function names(chatId: string): string[] {
+function scenes(chatId: string): { snapshotId: string; kind: CanvasKind; file: string }[] {
+	let names: string[];
 	try {
-		return fs.readdirSync(chatDir(chatId));
+		names = fs.readdirSync(chatDir(chatId));
 	} catch {
-		return []; // no drawings yet
+		return []; // nothing saved yet
 	}
+	return names
+		.map((name) => ({ name, match: SCENE_NAME.exec(name) }))
+		.filter((entry): entry is { name: string; match: RegExpExecArray } => entry.match !== null)
+		.map((entry) => ({ snapshotId: entry.match[1]!, kind: kindOf(entry.match[2]!), file: path.join(chatDir(chatId), entry.name) }));
 }
 
 export const canvasStore: CanvasStore = {
-	saveCanvas(chatId, snapshotId, scene, outline) {
+	saveCanvas(chatId, snapshotId, kind, scene, outline) {
 		const dir = chatDir(chatId);
 		fs.mkdirSync(dir, { recursive: true });
-		writeFileAtomicSync(path.join(dir, `${guard(snapshotId)}.excalidraw`), scene);
+		writeFileAtomicSync(path.join(dir, `${guard(snapshotId)}.${EXTENSION[kind]}`), scene);
 		writeFileAtomicSync(path.join(dir, `${snapshotId}.outline.txt`), outline);
 	},
 
 	listCanvases(chatId) {
 		const out: CanvasSummary[] = [];
-		for (const name of names(chatId)) {
-			const match = SCENE_NAME.exec(name);
-			if (!match) continue;
+		for (const scene of scenes(chatId)) {
 			try {
-				out.push({ snapshotId: match[1]!, createdAt: fs.statSync(path.join(chatDir(chatId), name)).mtime.toISOString() });
+				out.push({ snapshotId: scene.snapshotId, kind: scene.kind, createdAt: fs.statSync(scene.file).mtime.toISOString() });
 			} catch {
 				// removed between the listing and the stat
 			}
@@ -56,23 +62,24 @@ export const canvasStore: CanvasStore = {
 	},
 
 	readScene(chatId, snapshotId) {
+		guard(snapshotId);
+		const found = scenes(chatId).find((scene) => scene.snapshotId === snapshotId);
+		if (!found) return null;
 		try {
-			return fs.readFileSync(path.join(chatDir(chatId), `${guard(snapshotId)}.excalidraw`), "utf-8");
+			return fs.readFileSync(found.file, "utf-8");
 		} catch {
 			return null;
 		}
 	},
 
 	readOutlines(chatId) {
-		const out: Record<string, string> = {};
-		for (const name of names(chatId)) {
-			const match = OUTLINE_NAME.exec(name);
-			if (!match) continue;
+		const out: Record<string, { kind: CanvasKind; outline: string }> = {};
+		for (const scene of scenes(chatId)) {
 			try {
-				const outline = fs.readFileSync(path.join(chatDir(chatId), name), "utf-8");
-				if (outline.trim()) out[match[1]!] = outline;
+				const outline = fs.readFileSync(path.join(chatDir(chatId), `${scene.snapshotId}.outline.txt`), "utf-8");
+				if (outline.trim()) out[scene.snapshotId] = { kind: scene.kind, outline };
 			} catch {
-				// unreadable: the drawing still reaches the tutor as its image
+				// unreadable: it still reaches the tutor as its image
 			}
 		}
 		return out;

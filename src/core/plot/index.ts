@@ -1,0 +1,4 @@
+/** The grapher's pure core (fork, phase 5b — see FORK.md). */
+export * from "./expr.ts";
+export * from "./model.ts";
+export * from "./sample.ts";

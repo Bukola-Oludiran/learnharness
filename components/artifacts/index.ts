@@ -6,6 +6,7 @@ import { VisualCard } from "@/components/artifacts/visual-card";
 import { ImageCard } from "@/components/artifacts/image-card";
 import { ProbeDoneCard } from "@/components/artifacts/probe-done-card";
 import { ToolCallCard } from "@/components/artifacts/tool-call-card";
+import { GraphCard } from "@/components/artifacts/graph-card"; // fork: grapher (FORK.md)
 import { ProblemCard, ConcludeCard } from "@/components/practice-cards";
 
 /**
@@ -58,4 +59,6 @@ export const artifactRenderers: Record<string, ComponentType<ArtifactPartProps>>
 	material_status: ToolCallCard,
 	read_material: ToolCallCard,
 	mark_unit_covered: ToolCallCard,
+	// Fork (FORK.md): a graph the tutor placed, live in the transcript.
+	graph: GraphCard,
 };

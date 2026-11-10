@@ -57,7 +57,7 @@ export default function CanvasEditor({
 	useEffect(() => {
 		const controller = new AbortController();
 		void fetch(`/api/chats/${encodeURIComponent(chatId)}/canvases`, { cache: "no-store", signal: controller.signal })
-			.then(async (res) => (res.ok ? setEarlier(((await res.json()) as { canvases: CanvasSummary[] }).canvases) : undefined))
+			.then(async (res) => (res.ok ? setEarlier(((await res.json()) as { canvases: CanvasSummary[] }).canvases.filter((canvas) => canvas.kind === "drawing")) : undefined))
 			.catch(() => undefined);
 		return () => controller.abort();
 	}, [chatId]);

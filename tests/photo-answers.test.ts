@@ -180,6 +180,8 @@ describe("the tutor's photo rule", () => {
 			"Before you judge a photo answer, restate in one or two lines what you read from it: the key steps, the values and the final answer as you understood them. Then judge that reading. If part of the image is unclear or cut off, say which part and ask about it. Never mark work wrong on a guess at what it says.",
 			// Phase 5a: the canvas paragraph.
 			"A drawing made on the canvas arrives with an outline of its labelled shapes and arrows. Use the outline for what is labelled and what connects to what, and the image for layout. When you give feedback, name the specific shapes and arrows you mean.",
+			// Phase 5b: the grapher paragraph.
+			"A graph from the learner's grapher arrives with the expressions they entered. Judge those expressions and slider values; use the picture only to see the view they chose.",
 		].join("\n\n"));
 	});
 

@@ -7,6 +7,7 @@
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { createMaterialTools, type MaterialToolDeps } from "../agent/tools/ingest.ts";
+import { createGraphTool } from "../agent/tools/plot.ts";
 import { createUnitTool } from "../agent/tools/unit.ts";
 import { courseOfSession } from "../core/course.ts";
 import { nextUnit } from "../core/syllabus.ts";
@@ -76,5 +77,5 @@ export function unitToolFor(chatId: string, service: Pick<typeof syllabus, "setU
 /** The teacher's extra tools for one session. */
 export function materialToolsFor(chatId: string): AgentTool<any>[] {
 	const unitTool = unitToolFor(chatId);
-	return [...createMaterialTools(materialToolDeps(chatId)), ...(unitTool ? [unitTool] : [])];
+	return [...createMaterialTools(materialToolDeps(chatId)), createGraphTool(), ...(unitTool ? [unitTool] : [])];
 }

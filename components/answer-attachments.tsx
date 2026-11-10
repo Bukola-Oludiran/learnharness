@@ -1,9 +1,10 @@
 "use client";
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { ImageIcon, PaperclipIcon, PencilLineIcon, XIcon } from "lucide-react";
+import { ChartSplineIcon, ImageIcon, PaperclipIcon, PencilLineIcon, XIcon } from "lucide-react";
+import { GrapherOverlay } from "@/components/plot/grapher-overlay";
 import { cn } from "@/lib/utils";
-import { ATTACHMENT_ACCEPT, MAX_ANSWER_ATTACHMENTS } from "@/src/core";
+import { ATTACHMENT_ACCEPT, MAX_ANSWER_ATTACHMENTS, type PlotDoc } from "@/src/core";
 
 /**
  * Answer attachments (fork, phase 2 — see FORK.md): photos of the learner's
@@ -55,6 +56,8 @@ export interface AnswerAttachments {
 	addFiles: (files: Iterable<File>) => void;
 	/** A canvas drawing: its picture uploads like a photo, then its scene is saved under the snapshot id. */
 	addDrawing: (image: File, scene: string) => void;
+	/** A graph from the grapher (phase 5b): the same path, with the graph document as the scene. */
+	addGraph: (image: File, doc: PlotDoc) => void;
 	/** The session attachments go to; absent → nothing can be attached. */
 	chatId?: string;
 	remove: (key: string) => void;
@@ -150,6 +153,20 @@ export function useAnswerAttachments(chatId: string | undefined): AnswerAttachme
 		[upload],
 	);
 
+	const addGraph = useCallback(
+		(image: File, doc: PlotDoc) => {
+			if (itemsRef.current.length >= MAX_ANSWER_ATTACHMENTS) {
+				setNotice(`An answer can carry at most ${MAX_ANSWER_ATTACHMENTS} photos, drawings and graphs.`);
+				return;
+			}
+			setNotice(null);
+			const item = { key: crypto.randomUUID(), name: "Graph", previewUrl: URL.createObjectURL(image), status: "uploading" as const };
+			setItems((prev) => [...prev, item]);
+			void upload(item.key, image, JSON.stringify(doc));
+		},
+		[upload],
+	);
+
 	const remove = useCallback((key: string) => {
 		setItems((prev) => {
 			release(prev.filter((item) => item.key === key));
@@ -177,7 +194,7 @@ export function useAnswerAttachments(chatId: string | undefined): AnswerAttachme
 		[addFiles],
 	);
 
-	return { items, uploading: items.some((item) => item.status === "uploading"), notice, addFiles, addDrawing, chatId, remove, clear, onPasteCapture };
+	return { items, uploading: items.some((item) => item.status === "uploading"), notice, addFiles, addDrawing, addGraph, chatId, remove, clear, onPasteCapture };
 }
 
 // Excalidraw is large and browser-only: fetched the first time the canvas opens.
@@ -190,6 +207,7 @@ const DOCK_BUTTON =
 export function AttachPhotoButton({ attachments, disabled = false }: { attachments: AnswerAttachments; disabled?: boolean }) {
 	const inputRef = useRef<HTMLInputElement>(null);
 	const [drawing, setDrawing] = useState(false);
+	const [graphing, setGraphing] = useState(false);
 	const full = attachments.items.length >= MAX_ANSWER_ATTACHMENTS;
 	return (
 		<>
@@ -206,6 +224,30 @@ export function AttachPhotoButton({ attachments, disabled = false }: { attachmen
 					<PencilLineIcon className="size-3.5" />
 					Draw
 				</button>
+			)}
+			{attachments.chatId && (
+				<button
+					type="button"
+					data-testid="attach-graph"
+					aria-label="Graph your answer"
+					title={full ? `At most ${MAX_ANSWER_ATTACHMENTS} attachments` : "Answer with a graph"}
+					disabled={disabled || full}
+					onClick={() => setGraphing(true)}
+					className={DOCK_BUTTON}
+				>
+					<ChartSplineIcon className="size-3.5" />
+					Graph
+				</button>
+			)}
+			{graphing && attachments.chatId && (
+				<GrapherOverlay
+					chatId={attachments.chatId}
+					onClose={() => setGraphing(false)}
+					onUse={(image, doc) => {
+						attachments.addGraph(image, doc);
+						setGraphing(false);
+					}}
+				/>
 			)}
 			{drawing && attachments.chatId && (
 				<Suspense fallback={null}>
