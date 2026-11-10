@@ -15,6 +15,7 @@ import type {
 	ImageSnapshot,
 	ChatSettings,
 	ChatSummary,
+	CourseRecord,
 	GraphChain,
 	GraphNode,
 	JobKind,
@@ -66,6 +67,26 @@ export interface ChatStore {
 	 *  job cleanup are the caller's choreography (core/graph-deletion.ts +
 	 *  the DELETE route), not the store's. */
 	deleteChat(id: string): boolean;
+}
+
+// ─── CourseStore — course records (data/courses; fork, see FORK.md) ─────────
+
+/**
+ * One JSON file per course. The store persists whole records; membership
+ * rules (one course per session, pruning deleted sessions) are the server
+ * service's (src/server/courses.ts), not the store's.
+ */
+export interface CourseStore {
+	/** Create a course record (persisted immediately). */
+	createCourse(title: string, goal: string): CourseRecord;
+	/** The full record, or null if unknown id / corrupt file / newer version. */
+	getCourse(id: string): CourseRecord | null;
+	/** Every readable course, most recently updated first. */
+	listCourses(): CourseRecord[];
+	/** Persist the record (replace-whole). Throws when the id is unknown. */
+	saveCourse(course: CourseRecord): void;
+	/** Delete the record file. False when the id is unknown. */
+	deleteCourse(id: string): boolean;
 }
 
 // ─── GraphStore — the append-only evidence ledgers (data/graph) ──────────────

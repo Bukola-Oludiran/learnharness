@@ -18,13 +18,15 @@ export const dynamic = "force-dynamic";
 export default async function NewSessionPage({
 	searchParams,
 }: {
-	searchParams: Promise<{ mode?: string }>;
+	searchParams: Promise<{ mode?: string; course?: string }>;
 }) {
-	const { mode } = await searchParams;
+	const { mode, course } = await searchParams;
 	return (
 		<NewSession
 			initialConfigured={slotsConfigured(readSettingsRecord()?.models)}
 			mode={mode === "practice" ? "practice" : "teach"}
+			// Fork (FORK.md): ?course=<id> starts the session inside that course.
+			courseId={typeof course === "string" && /^[A-Za-z0-9_-]+$/.test(course) ? course : undefined}
 		/>
 	);
 }

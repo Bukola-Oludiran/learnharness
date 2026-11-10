@@ -38,6 +38,8 @@ export interface ServerEvents {
 	"activity-changed": Record<string, never>;
 	/** The session list changed (create, delete, title). */
 	"chats-changed": Record<string, never>;
+	/** A course record changed (create, edit, membership, delete). Fork. */
+	"courses-changed": Record<string, never>;
 	/** Source inventory, display names, or organizational folders changed. */
 	"sources-changed": Record<string, never>;
 	/** Web subscription state changed. No account or credential data on the bus. */
@@ -65,6 +67,7 @@ export const SERVER_EVENT_TYPES = [
 	"jobs-changed",
 	"activity-changed",
 	"chats-changed",
+	"courses-changed",
 	"sources-changed",
 	"subscriptions-changed",
 	"record-changed",
