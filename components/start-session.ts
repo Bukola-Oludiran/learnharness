@@ -4,6 +4,8 @@ interface SessionCreation {
 	title: string;
 	kind?: "practice";
 	graphContext?: { propositions: readonly { id: string; name: string; statement: string }[] };
+	/** Fork (FORK.md): start the session inside this course. */
+	courseId?: string;
 }
 
 /** Per source-composer instance. Retain a successful creation if storage

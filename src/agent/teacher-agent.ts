@@ -123,6 +123,9 @@ export interface AgentBuildOptions {
 	 *  fresh per turn, honoring enabled overrides (switch on + file
 	 *  exists); absent → the cached pure-source composition. */
 	promptSwitches?: Record<string, boolean>;
+	/** Fork (FORK.md): the session's course-context segment, appended after
+	 *  the composed prompt. Absent → the prompt is byte-identical to upstream. */
+	courseContext?: string;
 	/** Native conversation identity: the existing persisted chat id, reused
 	 * across reconstructed prober, teacher, and practice Agents.
 	 * Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream events
@@ -184,9 +187,10 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	const engine = opts.engine ?? piEngineFor(kind as "prober" | "teacher");
 	const stopper = makeQuestionStopper(kind);
 	const narrationGuard = narrationGuardApplies(kind, engine.model, opts.tools !== undefined);
-	const composedPrompt = opts.promptSwitches
+	const instructions = opts.promptSwitches
 		? composeInstructions(kind, opts.promptSwitches)
 		: composedInstructions[kind]!;
+	const composedPrompt = opts.courseContext ? `${instructions}\n\n---\n\n${opts.courseContext}` : instructions;
 	const systemPrompt = narrationGuard ? `${composedPrompt}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : composedPrompt;
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is

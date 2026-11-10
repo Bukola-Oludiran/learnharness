@@ -38,7 +38,23 @@ Add one row per edit, in the same pull request that makes it.
 
 | Upstream file | Change | For | Phase |
 | --- | --- | --- | --- |
-| _none yet_ | | | |
+| `config.ts` | `PATHS.courses`. | Courses | 1 |
+| `src/core/contracts.ts` | Re-exports `contracts/course.ts`. | Courses | 1 |
+| `src/core/ports.ts` | `CourseStore` interface and its `CourseRecord` import. | Courses | 1 |
+| `src/core/events.ts` | `courses-changed` in `ServerEvents` and `SERVER_EVENT_TYPES`. | Courses | 1 |
+| `src/server/stores.ts` | Wires `courseStore` into `stores`. | Courses | 1 |
+| `src/server/index.ts` | Re-exports `courses.ts`. | Courses | 1 |
+| `src/agent/teacher-agent.ts` | `AgentBuildOptions.courseContext`, appended after the composed prompt in `baseAgentOptions`. | Course context | 1 |
+| `src/server/chat-handler.ts` | Imports `courseContextFor` and passes `courseContext` in `agentOpts`. | Course context | 1 |
+| `app/api/chats/route.ts` | `POST` accepts `courseId`: 404 before the create when unknown, then adds the new session to the course. | Courses | 1 |
+| `components/start-session.ts` | `SessionCreation.courseId`. | Courses | 1 |
+| `components/new-session.tsx` | `courseId` parameter on `startDraftSession` and prop on `NewSession`. | Courses | 1 |
+| `app/chat/new/page.tsx` | Reads `?course=<id>` and passes it to `NewSession`. | Courses | 1 |
+| `components/sidebar.tsx` | Imports and renders `CoursesSection` above the session search row. | Courses | 1 |
+
+## Known gaps
+
+- The compaction threshold estimates the system prompt from `composeInstructions` alone (`src/server/chat-handler.ts`), so it does not count the course-context segment. The segment is at most a few hundred tokens.
 
 ## Workflows
 

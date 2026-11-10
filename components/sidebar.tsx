@@ -51,6 +51,7 @@ const STORAGE_KEY = "lh:sidebar-open";
 import type { ChatGPTControlBridge, NativeSubscriptionControlBridge } from "@/src/core";
 import type { UpdateState } from "@/components/settings/update-settings.tsx";
 import { FilePathDropZone } from "@/components/file-path-drop-zone";
+import { CoursesSection } from "@/components/courses-section"; // fork: courses (FORK.md)
 const SIDEBAR_AUTOCLOSE = 928;
 
 // Module scope, guarded for SSR (the server has no navigator).
@@ -720,6 +721,9 @@ function SessionsSidebar() {
 						<span className="sr-only">create a new practice session</span>
 					</button>
 				</div>
+
+				{/* Fork (FORK.md): the Courses section sits above the session list. */}
+				<CoursesSection open={open} />
 
 				<div className="mx-3 mb-2 flex items-center gap-2">
 					<span className="text-xs uppercase tracking-widest text-muted-foreground/70">Sessions</span>
