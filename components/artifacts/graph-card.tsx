@@ -4,7 +4,7 @@ import { useState } from "react";
 import { MaximizeIcon } from "lucide-react";
 import { ToolCallCard } from "@/components/artifacts/tool-call-card";
 import { GrapherOverlay } from "@/components/plot/grapher-overlay";
-import { PlotCanvas } from "@/components/plot/plot-canvas";
+import { PlotSurface } from "@/components/plot/grapher";
 import { cleanPlotDoc, DEFAULT_SLIDER, PLOT_COLORS, resolvePlot, withSliderValue, type ArtifactPartProps, type PlotDoc } from "@/src/core";
 
 /**
@@ -24,7 +24,8 @@ export function GraphCardBody({ initial }: { initial: PlotDoc }) {
 	const shown = doc.lines.filter((line, index) => line.text.trim() && resolved.lines[index]!.kind !== "definition" && resolved.lines[index]!.kind !== "error");
 	return (
 		<figure data-testid="graph-card" className="my-3 w-full max-w-2xl overflow-hidden rounded-lg border border-border">
-			<PlotCanvas doc={doc} onView={(view) => setDoc({ ...doc, view })} className="h-80 w-full" />
+			{/* Inside the lesson the wheel scrolls the lesson; a pinch or the buttons zoom the graph. */}
+			<PlotSurface doc={doc} onChange={setDoc} zoomWith="pinch" className={doc.mode === "3d" ? "h-96 w-full" : "h-80 w-full"} />
 			{sliders.length > 0 && (
 				<div className="border-t border-border px-3 py-2">
 					{sliders.map(({ line, source, index }) => {
@@ -53,7 +54,7 @@ export function GraphCardBody({ initial }: { initial: PlotDoc }) {
 			)}
 			<figcaption className="flex items-start gap-3 border-t border-border px-3 py-2 text-xs text-muted-foreground">
 				<span className="min-w-0 flex-1">
-					<span className="mr-2 uppercase tracking-wider text-muted-foreground/70">Graph</span>
+					<span className="mr-2 uppercase tracking-wider text-muted-foreground/70">{doc.mode === "3d" ? "3D graph" : "Graph"}</span>
 					{doc.title && <span className="mr-2 text-foreground">{doc.title}</span>}
 					<span className="font-mono">
 						{shown.map((line, index) => (

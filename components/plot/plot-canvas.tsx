@@ -21,10 +21,17 @@ export interface PlotCanvasHandle {
 
 const EXPORT_WIDTH = 1200;
 
-export const PlotCanvas = forwardRef<PlotCanvasHandle, { doc: PlotDoc; onView?: (view: PlotView) => void; className?: string }>(function PlotCanvas(
-	{ doc, onView, className },
-	ref,
-) {
+export const PlotCanvas = forwardRef<
+	PlotCanvasHandle,
+	{
+		doc: PlotDoc;
+		onView?: (view: PlotView) => void;
+		/** "wheel": the scroll wheel zooms (the full-window grapher). "pinch":
+		 *  only a pinch does, so a graph inside the lesson never traps scrolling. */
+		zoomWith?: "wheel" | "pinch";
+		className?: string;
+	}
+>(function PlotCanvas({ doc, onView, zoomWith = "wheel", className }, ref) {
 	const wrapRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const [size, setSize] = useState({ width: 0, height: 0 });
@@ -97,6 +104,8 @@ export const PlotCanvas = forwardRef<PlotCanvasHandle, { doc: PlotDoc; onView?: 
 		const canvas = canvasRef.current;
 		if (!canvas || !onView) return;
 		const onWheel = (event: WheelEvent) => {
+			// A trackpad pinch arrives as a wheel event with ctrlKey set.
+			if (zoomWith === "pinch" && !event.ctrlKey) return;
 			event.preventDefault();
 			zoomBy(Math.exp(event.deltaY * 0.0015), graphPoint(event.clientX, event.clientY));
 		};

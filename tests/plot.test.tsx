@@ -163,3 +163,47 @@ describe("the grapher's views", () => {
 		assert.match(renderToStaticMarkup(<GraphCard {...part({ state: "input-available", output: undefined })} />), /data-testid="tool-call-card"/);
 	});
 });
+
+// ── Phase 5c: 3D ────────────────────────────────────────────────────────────
+describe("the grapher in 3D", () => {
+	const noop = () => {};
+
+	it("has a 2D / 3D switch showing the current mode", async () => {
+		const { ModeSwitch } = await import("../components/plot/grapher.tsx");
+		const html = renderToStaticMarkup(<ModeSwitch mode="3d" onMode={noop} />);
+		assert.match(html, /data-testid="plot-mode-2d" aria-pressed="false"[\s\S]*data-testid="plot-mode-3d" aria-pressed="true"/);
+	});
+
+	it("a line for the other mode offers to switch", () => {
+		const d = doc(["z = x^2 + y^2"]);
+		const html = renderToStaticMarkup(
+			<ExpressionRow line={d.lines[0]!} meaning={resolvePlot(d).lines[0]!} index={0} onText={noop} onToggle={noop} onRemove={noop} onEnter={noop} onSlider={noop} onRange={noop} onAddSlider={noop} onSwitchMode={noop} />,
+		);
+		assert.match(html, /This uses z, so it needs a 3D graph\.[\s\S]*data-testid="plot-switch-mode"[^>]*>Switch to (<!-- -->)?3D</);
+		const polar: PlotDoc = { ...doc(["r = 1 + cos(theta)"]), mode: "3d" };
+		const back = renderToStaticMarkup(
+			<ExpressionRow line={polar.lines[0]!} meaning={resolvePlot(polar).lines[0]!} index={0} onText={noop} onToggle={noop} onRemove={noop} onEnter={noop} onSlider={noop} onRange={noop} onAddSlider={noop} onSwitchMode={noop} />,
+		);
+		assert.match(back, /Polar curves only work on a 2D graph\.[\s\S]*>Switch to (<!-- -->)?2D</);
+	});
+
+	it("a 3D tutor graph is labelled as one, and a 3D graph sent as an answer reads as one", () => {
+		const built = graphDocOf({ expressions: ["z = a x y", "a = 1"], dimension: 3, title: "Saddle" });
+		const card = renderToStaticMarkup(<GraphCardBody initial={built} />);
+		assert.match(card, /data-testid="graph-card"[\s\S]*3D graph[\s\S]*Saddle[\s\S]*z = a x y/);
+		assert.match(card, /data-testid="graph-card-slider"/);
+		assert.equal(hasDrawableLines(built), true);
+		const chat = stores.chatStore.createChat("Surfaces");
+		const png = Buffer.from("3d png");
+		const id = createHash("sha256").update(png).digest("hex");
+		stores.chatStore.saveImageSnapshot(chat.id, id, { mimeType: "image/png", data: png.toString("base64"), width: 1, height: 1 });
+		assert.deepEqual(saveCanvas(chat.id, id, JSON.stringify(built)), { ok: true, outline: "3D graph.\n1. z = a x y\n2. a = 1 (slider, from -10 to 10)\nBox: x from -5 to 5, y from -5 to 5, z from -5 to 5" });
+		assert.equal(listSessionPlots(chat.id)[0]!.doc.mode, "3d");
+	});
+
+	it("the tool's description covers 3D as approved", () => {
+		const description = createGraphTool().description;
+		assert.match(description, /Set dimension to 3 for a 3D graph the learner can rotate\. There, give a surface as z = x\^2 \+ y\^2 \(or just an expression in x and y\);/);
+		assert.match(description, /The box runs from -5 to 5 on each axis unless you set it\./);
+	});
+});

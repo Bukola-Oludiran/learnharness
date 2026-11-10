@@ -60,10 +60,6 @@ const nextConfig: NextConfig = {
 			"github-copilot-credentials.json*",
 			"xai-credentials.json*",
 			".env*",
-			// Fork (FORK.md): the checkout's git folder must never ride along —
-			// it is large, it is history, and its read-only files break signing.
-			".git/**/*",
-			".github/**/*",
 		],
 	},
 	// Empirically verified gaps (2026-09-17 standalone smoke): the tracer
