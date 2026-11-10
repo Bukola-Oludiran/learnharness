@@ -18,3 +18,4 @@ export * from "./contracts/probe.ts";
 export * from "./contracts/models.ts";
 export * from "./contracts/course.ts"; // fork: courses (FORK.md)
 export * from "./contracts/material.ts"; // fork: materials (FORK.md)
+export * from "./contracts/evidence.ts"; // fork: learner evidence (FORK.md)

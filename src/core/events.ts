@@ -42,6 +42,8 @@ export interface ServerEvents {
 	"courses-changed": Record<string, never>;
 	/** A material record changed (upload, conversion progress, review, delete). Fork. */
 	"materials-changed": Record<string, never>;
+	/** The learner-evidence ledger changed (a test approved or deleted, a practice problem concluded). Fork. */
+	"evidence-changed": Record<string, never>;
 	/** Source inventory, display names, or organizational folders changed. */
 	"sources-changed": Record<string, never>;
 	/** Web subscription state changed. No account or credential data on the bus. */
@@ -71,6 +73,7 @@ export const SERVER_EVENT_TYPES = [
 	"chats-changed",
 	"courses-changed",
 	"materials-changed",
+	"evidence-changed",
 	"sources-changed",
 	"subscriptions-changed",
 	"record-changed",

@@ -10,12 +10,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 	return Response.json(found);
 }
 
-/** Approve a material waiting for review. `text`, when sent, replaces the
- *  transcript first (the learner's corrections). */
+/** Approve a material waiting for review. `text` (notes) or `reading`
+ *  (tests), when sent, replaces what was read first — the learner's
+ *  corrections. */
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
-	const body = (await req.json().catch(() => null)) as { text?: unknown } | null;
-	const outcome = materials.approveMaterial(id, body?.text);
+	const body = (await req.json().catch(() => null)) as { text?: unknown; reading?: unknown } | null;
+	const outcome = materials.approveMaterial(id, { text: body?.text, reading: body?.reading });
 	if (!outcome.ok) return Response.json({ error: outcome.error, code: outcome.code }, { status: outcome.status });
 	return Response.json({ material: outcome.material });
 }

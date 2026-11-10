@@ -7,7 +7,8 @@ import { useBackdropDismiss } from "@/components/backdrop-dismiss";
 import { BrailleSpinner } from "@/components/braille-spinner";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import { cn } from "@/lib/utils";
-import { AI_READ_MARK, MATERIAL_ACCEPT, type MaterialView } from "@/src/core";
+import { TestReviewBody } from "@/components/test-review";
+import { AI_READ_MARK, MATERIAL_ACCEPT, TEST_ACCEPT, type MaterialView, type TestReading } from "@/src/core";
 
 /**
  * A course's materials (fork, phase 3a — see FORK.md): upload notes
@@ -27,10 +28,16 @@ export function materialStatus(material: MaterialView): { label: string; busy: b
 	if (material.interrupted) return { label: "Interrupted", busy: false, tone: "problem" };
 	switch (material.status) {
 		case "processing":
+			if (material.kind === "test") return { label: material.stage === "extracting" ? "Recording results…" : "Reading the paper…", busy: true, tone: "quiet" };
 			return { label: material.stage === "extracting" ? "Adding to graph…" : "Converting…", busy: true, tone: "quiet" };
 		case "review":
 			return { label: "Needs review", busy: false, tone: "attention" };
 		case "ready":
+			if (material.kind === "test") {
+				const score = material.score ? `Score ${material.score.earned}/${material.score.possible}` : "Recorded";
+				const unplaced = material.unplaced ? ` · ${material.unplaced} unplaced` : "";
+				return { label: `${score}${unplaced}`, busy: false, tone: "quiet" };
+			}
 			return { label: "In graph", busy: false, tone: "quiet" };
 		case "failed":
 			return { label: "Failed", busy: false, tone: "problem" };
@@ -42,6 +49,7 @@ export function MaterialRow({
 	material,
 	confirmingDelete = false,
 	onReview,
+	onResults,
 	onRetry,
 	onAskDelete,
 	onCancelDelete,
@@ -50,6 +58,8 @@ export function MaterialRow({
 	material: MaterialView;
 	confirmingDelete?: boolean;
 	onReview: () => void;
+	/** Open an approved test's results. */
+	onResults?: () => void;
 	onRetry: () => void;
 	onAskDelete: () => void;
 	onCancelDelete: () => void;
@@ -64,7 +74,7 @@ export function MaterialRow({
 				<span className="min-w-0 flex-1">
 					<span className="block truncate font-prose text-(length:--lh-prose-size)">{material.title}</span>
 					<span className="block text-xs text-muted-foreground">
-						{FORMAT_LABEL[material.format]} ·{" "}
+						{material.kind === "test" ? "Marked test" : FORMAT_LABEL[material.format]} ·{" "}
 						<span
 							data-testid="material-status"
 							className={cn(status.tone === "attention" && "text-foreground", status.tone === "problem" && "text-destructive")}
@@ -88,6 +98,11 @@ export function MaterialRow({
 						{material.status === "review" && (
 							<button type="button" data-testid="material-review" onClick={onReview} className={ACTION}>
 								Review
+							</button>
+						)}
+						{material.kind === "test" && material.status === "ready" && onResults && (
+							<button type="button" data-testid="material-results" onClick={onResults} className={ACTION}>
+								Results
 							</button>
 						)}
 						{(material.status === "failed" || material.interrupted) && (
@@ -192,6 +207,7 @@ export function MaterialReviewBody({
 
 function MaterialReviewDialog({ material, onClose }: { material: MaterialView | null; onClose: () => void }) {
 	const [text, setText] = useState<string | null>(null);
+	const [reading, setReading] = useState<TestReading | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const backdropDismiss = useBackdropDismiss(() => {
@@ -201,6 +217,7 @@ function MaterialReviewDialog({ material, onClose }: { material: MaterialView | 
 
 	useEffect(() => {
 		setText(null);
+		setReading(null);
 		setBusy(false);
 		setError(null);
 		if (!id) return;
@@ -208,7 +225,9 @@ function MaterialReviewDialog({ material, onClose }: { material: MaterialView | 
 		void fetch(`/api/materials/${id}`, { cache: "no-store", signal: controller.signal })
 			.then(async (res) => {
 				if (!res.ok) throw new Error();
-				setText(((await res.json()) as { text: string | null }).text ?? "");
+				const body = (await res.json()) as { text: string | null; reading: TestReading | null };
+				setText(body.text ?? "");
+				setReading(body.reading ?? { questions: [] });
 			})
 			.catch(() => {
 				if (!controller.signal.aborted) setError("Could not load the transcript.");
@@ -249,6 +268,27 @@ function MaterialReviewDialog({ material, onClose }: { material: MaterialView | 
 	};
 
 	if (!material) return null;
+	const approve = (body: object, failure: string) =>
+		void run(() => fetch(`/api/materials/${material.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }), failure);
+	const discard = () => void run(() => fetch(`/api/materials/${material.id}`, { method: "DELETE" }), "Could not discard the material. Try again.");
+	if (material.kind === "test") {
+		return createPortal(
+			<div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80" {...backdropDismiss}>
+				<TestReviewBody
+					material={material}
+					reading={reading}
+					readOnly={material.status !== "review"}
+					busy={busy}
+					error={error}
+					onReading={setReading}
+					onClose={onClose}
+					onApprove={() => approve({ reading }, "Could not approve the test. Try again.")}
+					onDiscard={discard}
+				/>
+			</div>,
+			document.body,
+		);
+	}
 	return createPortal(
 		<div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80" {...backdropDismiss}>
 			<MaterialReviewBody
@@ -341,7 +381,29 @@ export function CourseMaterials({ courseId }: { courseId: string }) {
 			.then(() => refresh());
 	};
 
-	const reviewing = materials?.find((m) => m.id === reviewingId && m.status === "review") ?? null;
+	// Review while waiting; an approved test reopens read-only as its results.
+	const reviewing = materials?.find((m) => m.id === reviewingId && (m.status === "review" || (m.kind === "test" && m.status === "ready"))) ?? null;
+	const testInputRef = useRef<HTMLInputElement>(null);
+
+	/** A marked test: every chosen page goes up together and becomes ONE material. */
+	const uploadTest = async (files: FileList) => {
+		const form = new FormData();
+		for (const file of files) form.append("files", file);
+		setProblems([]);
+		setUploading((n) => n + 1);
+		try {
+			const res = await fetch(`/api/materials?kind=test&courseId=${encodeURIComponent(courseId)}`, { method: "POST", body: form });
+			if (!res.ok) {
+				const body = (await res.json().catch(() => ({}))) as { error?: string };
+				setProblems([body.error ?? `Upload failed (${res.status}).`]);
+			}
+		} catch {
+			setProblems(["Upload failed — network error."]);
+		} finally {
+			setUploading((n) => n - 1);
+		}
+		void refresh();
+	};
 
 	return (
 		<section className="mt-8" data-testid="course-materials">
@@ -359,6 +421,30 @@ export function CourseMaterials({ courseId }: { courseId: string }) {
 						e.target.value = "";
 					}}
 				/>
+				<input
+					ref={testInputRef}
+					type="file"
+					multiple
+					hidden
+					accept={TEST_ACCEPT}
+					data-testid="test-upload-input"
+					onChange={(e) => {
+						if (e.target.files && e.target.files.length > 0) void uploadTest(e.target.files);
+						e.target.value = "";
+					}}
+				/>
+				<span className="flex-1" />
+				<button
+					type="button"
+					data-testid="test-upload"
+					title="Choose every page of one marked test (photos), or one scanned PDF"
+					onClick={() => testInputRef.current?.click()}
+					disabled={uploading > 0}
+					className={cn(QUIET, "flex items-center gap-1.5")}
+				>
+					<UploadIcon className="size-3" />
+					Upload marked test
+				</button>
 				<button
 					type="button"
 					data-testid="material-upload"
@@ -382,7 +468,8 @@ export function CourseMaterials({ courseId }: { courseId: string }) {
 					<div className="px-2 py-3 text-xs text-muted-foreground">Loading…</div>
 				) : materials.length === 0 ? (
 					<div data-testid="course-materials-empty" className="px-2 py-3 text-xs text-muted-foreground">
-						No materials yet. Upload slides (.pptx), PDFs, photos of notes, or text files, and their ideas join your knowledge graph.
+						No materials yet. Upload slides (.pptx), PDFs, photos of notes, or text files, and their ideas join your knowledge graph. Upload a
+						marked test and its results are recorded on the ideas it tests.
 					</div>
 				) : (
 					materials.map((material) => (
@@ -391,6 +478,7 @@ export function CourseMaterials({ courseId }: { courseId: string }) {
 							material={material}
 							confirmingDelete={deletingId === material.id}
 							onReview={() => setReviewingId(material.id)}
+							onResults={() => setReviewingId(material.id)}
 							onRetry={() => act(`/api/materials/${material.id}/retry`, "POST")}
 							onAskDelete={() => setDeletingId(material.id)}
 							onCancelDelete={() => setDeletingId(null)}

@@ -73,6 +73,10 @@ export const LEDGER_FILES = {
 	coverage: path.join(PATHS.graph, "coverage.jsonl"),
 } as const;
 
+/** Learner evidence (fork — see FORK.md): an append-only JSONL beside the
+ *  graph ledgers, one line per result. Upstream code never reads it. */
+export const EVIDENCE_FILE = path.join(PATHS.graph, "evidence.jsonl");
+
 /**
  * Notes-import bookkeeping (NOT a ledger): one JSON map, src-id → NotesSource
  * record (contracts/graph.ts) — the file path + import time + the run's usage

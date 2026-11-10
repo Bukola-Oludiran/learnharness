@@ -17,6 +17,8 @@ import type {
 	ChatSummary,
 	CourseRecord,
 	MaterialRecord,
+	Evidence,
+	TestReading,
 	GraphChain,
 	GraphNode,
 	JobKind,
@@ -99,20 +101,37 @@ export interface CourseStore {
  */
 export interface MaterialStore {
 	/** Create the record and store the uploaded bytes as original.<extension>. */
-	createMaterial(init: Omit<MaterialRecord, "id" | "createdAt" | "updatedAt" | "version">, original: Uint8Array, extension: string): MaterialRecord;
+	createMaterial(init: Omit<MaterialRecord, "id" | "createdAt" | "updatedAt" | "version">, originals: readonly { bytes: Uint8Array; extension: string }[]): MaterialRecord;
 	/** The record, or null if unknown id / corrupt file / newer version. */
 	getMaterial(id: string): MaterialRecord | null;
 	/** Every readable material, oldest upload first. */
 	listMaterials(): MaterialRecord[];
 	/** Persist the record (replace-whole, bumps updatedAt). Throws when unknown. */
 	saveMaterial(record: MaterialRecord): void;
-	/** Absolute path of the stored original, or null. */
-	originalPath(id: string): string | null;
+	/** Absolute paths of the stored originals, in upload order (a test
+	 *  paper may be several pages). Empty when none. */
+	originalPaths(id: string): string[];
+	/** A marked test's reading (test.json), or null. */
+	readReading(id: string): TestReading | null;
+	writeReading(id: string, reading: TestReading): void;
 	/** The converted transcript, or null before conversion. */
 	readText(id: string): string | null;
 	writeText(id: string, text: string): void;
 	/** Remove the material's folder. False when the id is unknown. */
 	deleteMaterial(id: string): boolean;
+}
+
+// ─── EvidenceStore — learner evidence (graph/evidence.jsonl; fork) ──────────
+
+/** One line per result, append-only. The state an idea shows is DERIVED
+ *  from these lines (core/evidence.ts); the store never decides. */
+export interface EvidenceStore {
+	/** Every readable line, in append order. */
+	read(): Evidence[];
+	/** Append the entries whose id is not already present. Returns how many landed. */
+	append(entries: readonly Evidence[]): number;
+	/** Replace the whole ledger atomically (a deleted or re-approved test). */
+	rewrite(entries: readonly Evidence[]): void;
 }
 
 // ─── GraphStore — the append-only evidence ledgers (data/graph) ──────────────

@@ -83,6 +83,9 @@ export interface CanvasNode {
 	x: number;
 	y: number;
 	label: string;
+	/** Fork (FORK.md): a resolved #rrggbb fill replacing colors.node for
+	 *  this node (the learner-evidence state). Absent = the default. */
+	tint?: string;
 }
 
 /** One directed edge of the DERIVED view (chains-primary, 2026-09-30):
@@ -637,6 +640,8 @@ export class GraphCanvasRenderer {
 	private geoVersion = 0; // bump = geometry inputs changed
 	private builtVersion = -1; // version the cache was built at
 	private nodesPath: Path2D | null = null;
+	/** Fork (FORK.md): tinted nodes, one cached path per tint colour. */
+	private tintPaths = new Map<string, Path2D>();
 	private shaftsPath: Path2D = new Path2D();
 	private headsPath: Path2D = new Path2D();
 	private regionCanvas: HTMLCanvasElement | null = null;
@@ -1239,12 +1244,20 @@ export class GraphCanvasRenderer {
 		// Node discs: one Path2D, one fill() per frame. Implication nodes
 		// are pure geometry — never a disc, never a label, never picked.
 		const nodesPath = new Path2D();
+		const tintPaths = new Map<string, Path2D>();
 		for (const n of data.nodes) {
 			if (!isVisible(n.id) || isImpNodeId(n.id)) continue;
-			nodesPath.moveTo(n.x + nodeR, n.y);
-			nodesPath.arc(n.x, n.y, nodeR, 0, Math.PI * 2);
+			// Fork (FORK.md): a tinted node joins its colour's path instead.
+			let path = nodesPath;
+			if (n.tint) {
+				path = tintPaths.get(n.tint) ?? new Path2D();
+				tintPaths.set(n.tint, path);
+			}
+			path.moveTo(n.x + nodeR, n.y);
+			path.arc(n.x, n.y, nodeR, 0, Math.PI * 2);
 		}
 		this.nodesPath = nodesPath;
+		this.tintPaths = tintPaths;
 
 		// Edge shafts + arrowheads (rendering arc, owner 2026-09-30): all
 		// arrows are PLAIN single shafts — the old double-shaft glyph is
@@ -1664,6 +1677,11 @@ export class GraphCanvasRenderer {
 		// 4. Nodes: one cached Path2D, one fill.
 		ctx.fillStyle = data.colors.node;
 		ctx.fill(this.nodesPath);
+		// Fork (FORK.md): one more fill per evidence tint in use (at most three).
+		for (const [tint, path] of this.tintPaths) {
+			ctx.fillStyle = tint;
+			ctx.fill(path);
+		}
 
 		// 6. Node labels — one global gate, faded together. World-scaled
 		// with the graph (they grow as you zoom in, Obsidian-style).
