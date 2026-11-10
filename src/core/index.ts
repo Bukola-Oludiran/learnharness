@@ -47,6 +47,7 @@ export * from "./native-messages.ts";
 export * from "./compaction.ts";
 export * from "./input-events.ts";
 export * from "./attachments.ts"; // fork: answer attachments (FORK.md)
+export * from "./material.ts"; // fork: materials (FORK.md)
 export { parseFilePaths, quoteFilePath, filePathLabel, isDirectoryReference, directoryReferencePath } from "./file-paths.ts";
 export type { FilePathPart } from "./file-paths.ts";
 // Wave D (owner-approved 2026-09-26): the client view model — the grouping

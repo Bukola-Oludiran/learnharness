@@ -16,6 +16,7 @@ import type {
 	ChatSettings,
 	ChatSummary,
 	CourseRecord,
+	MaterialRecord,
 	GraphChain,
 	GraphNode,
 	JobKind,
@@ -87,6 +88,31 @@ export interface CourseStore {
 	saveCourse(course: CourseRecord): void;
 	/** Delete the record file. False when the id is unknown. */
 	deleteCourse(id: string): boolean;
+}
+
+// ─── MaterialStore — uploaded materials (data/materials; fork, see FORK.md) ──
+
+/**
+ * One folder per material: the record, the app's own copy of the upload,
+ * and the converted transcript. Conversion, review and extraction are the
+ * server service's (src/server/materials.ts); the store only persists.
+ */
+export interface MaterialStore {
+	/** Create the record and store the uploaded bytes as original.<extension>. */
+	createMaterial(init: Omit<MaterialRecord, "id" | "createdAt" | "updatedAt" | "version">, original: Uint8Array, extension: string): MaterialRecord;
+	/** The record, or null if unknown id / corrupt file / newer version. */
+	getMaterial(id: string): MaterialRecord | null;
+	/** Every readable material, oldest upload first. */
+	listMaterials(): MaterialRecord[];
+	/** Persist the record (replace-whole, bumps updatedAt). Throws when unknown. */
+	saveMaterial(record: MaterialRecord): void;
+	/** Absolute path of the stored original, or null. */
+	originalPath(id: string): string | null;
+	/** The converted transcript, or null before conversion. */
+	readText(id: string): string | null;
+	writeText(id: string, text: string): void;
+	/** Remove the material's folder. False when the id is unknown. */
+	deleteMaterial(id: string): boolean;
 }
 
 // ─── GraphStore — the append-only evidence ledgers (data/graph) ──────────────

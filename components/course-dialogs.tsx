@@ -223,7 +223,8 @@ export function DeleteCourseBody({
 				<code className="font-mono text-sm text-foreground">{title}</code>
 			</div>
 			<p className="mt-2 text-sm text-muted-foreground">
-				This removes the course and its goal. Its sessions are kept and stay in your session list. This cannot be undone.
+				This removes the course, its goal and its uploaded materials. Its sessions are kept and stay in your session list, and
+				ideas already in your knowledge graph stay there. This cannot be undone.
 			</p>
 			{error && (
 				<p role="alert" className="mt-3 text-xs text-destructive">

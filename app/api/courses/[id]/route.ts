@@ -1,4 +1,4 @@
-import { deleteCourse, getCourse, updateCourse } from "@/src/server";
+import { deleteCourse, getCourse, materials, updateCourse } from "@/src/server";
 
 /** One course, its sessions projected down to chats that still exist. */
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -17,9 +17,13 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 	return Response.json({ course: outcome.course });
 }
 
-/** Delete the course record. Its sessions are kept and become loose sessions. */
+/** Delete the course record. Its sessions are kept and become loose
+ *  sessions; its uploaded materials go with it (their stored files would
+ *  otherwise be unreachable), while ideas they added stay in the graph. */
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
+	if (!getCourse(id)) return Response.json({ error: "Not found" }, { status: 404 });
+	for (const material of materials.listCourseMaterials(id)) materials.deleteMaterial(material.id);
 	if (!deleteCourse(id)) return Response.json({ error: "Not found" }, { status: 404 });
 	return Response.json({ ok: true });
 }

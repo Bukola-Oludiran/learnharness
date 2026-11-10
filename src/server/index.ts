@@ -9,6 +9,7 @@ export * from "./events-stream.ts";
 export * from "./chats.ts";
 export * from "./courses.ts"; // fork: courses (FORK.md)
 export * from "./attachments.ts"; // fork: answer attachments (FORK.md)
+export * from "./materials.ts"; // fork: materials (FORK.md)
 export * from "./graph.ts";
 export * from "./source-organization.ts";
 export * from "./source-deletion.ts";
