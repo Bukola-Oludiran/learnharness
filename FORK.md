@@ -59,6 +59,7 @@ Add one row per edit, in the same pull request that makes it.
 | `components/artifacts/index.ts` | Registers `ToolCallCard` for `ingest_material`, `material_status`, `read_material` and `mark_unit_covered`; registers `GraphCard` for `graph`. | Tutor tools, grapher | 3c, 4a, 4c, 5b |
 | `components/artifacts/tool-call-card.tsx` | `headlineArg` shows `ingest_material`'s first path and how many more, and `read_material`'s book and section. | Tutor material tools | 3c, 4a |
 | `next.config.ts` | `proxyClientMaxBodySize` raised to the book cap (200 MiB plus headroom); imports `MAX_BOOK_BYTES`. | Books | 4a |
+| `next.config.ts` | `outputFileTracingExcludes` gains `.git/**/*` and `.github/**/*`: the 5b build swept the checkout's git folder into the packaged server, and codesign failed on its read-only files. | Local app | 5b |
 | `app/api/chats/route.ts` | `POST` accepts `courseId`: 404 before the create when unknown, then adds the new session to the course. With `unitId` the session is scoped to that syllabus unit. | Courses, unit sessions | 1, 4c |
 | `components/start-session.ts` | `SessionCreation.courseId` and `unitId`; the interface is exported. | Courses, unit sessions | 1, 4c |
 | `components/new-session.tsx` | `courseId` parameter on `startDraftSession` and prop on `NewSession`. | Courses | 1 |
