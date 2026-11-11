@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Excalidraw, exportToBlob, serializeAsJSON } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
+import { useColorMode } from "@/components/color-mode";
 import type { CanvasSummary } from "@/src/core";
 
 /**
@@ -48,6 +49,7 @@ export default function CanvasEditor({
 	onClose: () => void;
 }) {
 	const apiRef = useRef<ExcalidrawApi | null>(null);
+	const mode = useColorMode();
 	const [earlier, setEarlier] = useState<CanvasSummary[]>([]);
 	const [startFrom, setStartFrom] = useState("");
 	const [empty, setEmpty] = useState(true);
@@ -156,7 +158,7 @@ export default function CanvasEditor({
 					excalidrawAPI={(api) => {
 						apiRef.current = api;
 					}}
-					theme="dark"
+					theme={mode}
 					onChange={(elements) => setEmpty(!elements.some((element) => !element.isDeleted))}
 					UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, export: false, saveAsImage: false, toggleTheme: true } }}
 				/>

@@ -3,6 +3,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { resolvePlot, squareView, withVectorValue, zoomView, type PlotDoc, type PlotView } from "@/src/core";
+import { useColorMode } from "@/components/color-mode";
 import { DARK_THEME, drawPlot, LIGHT_THEME, TIP_REACH } from "./draw";
 
 /**
@@ -39,6 +40,7 @@ export const PlotCanvas = forwardRef<
 	const wrapRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const [size, setSize] = useState({ width: 0, height: 0 });
+	const mode = useColorMode();
 	const drag = useRef<{ x: number; y: number; view: PlotView } | { vector: string } | null>(null);
 	const [overTip, setOverTip] = useState(false);
 	const tips = useMemo(
@@ -67,8 +69,8 @@ export const PlotCanvas = forwardRef<
 		const ctx = canvas.getContext("2d");
 		if (!ctx) return;
 		ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-		drawPlot(ctx, size.width, size.height, doc, shown(), DARK_THEME);
-	}, [doc, size, shown]);
+		drawPlot(ctx, size.width, size.height, doc, shown(), mode === "light" ? LIGHT_THEME : DARK_THEME);
+	}, [doc, size, shown, mode]);
 
 	useImperativeHandle(
 		ref,

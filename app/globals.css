@@ -27,41 +27,44 @@
 	outline: none;
 }
 
-/* Palette: Ink and cobalt, dark (fork, look 1 — FORK.md; owner's choice 2026-11-11).
+/* Palette: Ink and cobalt (fork, looks 1 and 2 — FORK.md; owner's choice 2026-11-11).
+   This block is the LIGHT mode; the .dark block below is the dark one.
    Upstream's was main #141414, raised #1C1C1C, edges #434343.
    Mono chrome = JetBrains Mono; prose = Source Sans 3; titles = CMU Serif. */
 :root {
-	color-scheme: dark;
+	color-scheme: light;
 	--radius: 8px;
-	--background: #131b2c;
-	--foreground: #e6ecf7;
-	--card: #1b2539;
-	--card-foreground: #e6ecf7;
-	--popover: #1b2539;
-	--popover-foreground: #e6ecf7;
-	--primary: #7da4ff;
-	--primary-foreground: #0c1424;
-	--secondary: #1b2539;
-	--secondary-foreground: #e6ecf7;
-	--muted: #1b2539;
-	--muted-foreground: #96a4bf;
-	--accent: #263350;
-	--accent-foreground: #e6ecf7;
-	--destructive: #ff8f85;
-	--border: #2d3b58;
-	--input: #2d3b58;
-	--ring: #7da4ff;
+	--background: #f6f8fb;
+	--foreground: #16223a;
+	--card: #ffffff;
+	--card-foreground: #16223a;
+	--popover: #ffffff;
+	--popover-foreground: #16223a;
+	--primary: #1f4fd8;
+	--primary-foreground: #ffffff;
+	--secondary: #ffffff;
+	--secondary-foreground: #16223a;
+	--muted: #eef2f8;
+	--muted-foreground: #5b6a85;
+	--accent: #e4eaf4;
+	--accent-foreground: #16223a;
+	--destructive: #c2362f;
+	--border: #d3dbe8;
+	--input: #d3dbe8;
+	--ring: #1f4fd8;
 	/* Fork (FORK.md, look 1): what colour is FOR. --primary above is the one
 	   accent (anything you can press, links, focus); these are the rest.
 	   Soft = the tinted surface behind the strong ink of the same role. */
-	--lh-side: #0e1525;
-	--lh-accent-soft: #233563;
-	--lh-good: #55d3a4;
-	--lh-good-soft: #173d33;
-	--lh-warn: #f2c14e;
-	--lh-warn-soft: #43361a;
-	--lh-bad: #ff8f85;
-	--lh-bad-soft: #4a2224;
+	--lh-side: #ebf0f7;
+	--lh-accent-soft: #dfe8ff;
+	--lh-good: #17805a;
+	--lh-good-soft: #d9f2e7;
+	--lh-warn: #a8690c;
+	--lh-warn-soft: #fbecd0;
+	--lh-bad: #c2362f;
+	--lh-bad-soft: #fbe0dd;
+	/* Code on a light page: a shade deeper than the page (the dark rule mixes in black, which is grey here). */
+	--lh-code-surface: #e9eef6;
 	/* Emphasis inks default to the REGULAR TEXT COLOR (owner ruling,
 	   appearance wave 2026-09-26 — the old #ee928c/#6fa9d6 factory
 	   emphasis colors are gone). Explicit overrides land via the
@@ -79,9 +82,10 @@
 	--lh-heading-weight: 900;
 }
 
-/* The app is always dark (<html class="dark">); mirror the same values so
-   the block stays coherent under Tailwind's variant. */
+/* Dark (fork, looks 1 and 2 — FORK.md). <html> is served with class "dark";
+   the Mode setting removes it for light, where the :root block above applies. */
 .dark {
+	color-scheme: dark;
 	--background: #131b2c;
 	--foreground: #e6ecf7;
 	--card: #1b2539;
@@ -373,6 +377,15 @@ body {
 [data-streamdown="code-block"] {
 	border: 1px solid var(--border);
 	background: color-mix(in oklab, var(--background) 86%, black);
+}
+/* Fork (FORK.md, look 2): on a light page the mix with black above reads as grey; use the light tint. */
+html:not(.dark) [data-streamdown="inline-code"],
+html:not(.dark) [data-streamdown="code-block"] {
+	background: var(--lh-code-surface);
+}
+/* The key-idea callout's white outline (upstream's rule for a dark page) is ink on a light one. */
+html:not(.dark) [data-testid="md-callout"] {
+	border-color: var(--foreground);
 }
 [data-streamdown="code-block"] {
 	border-radius: 0.75rem;

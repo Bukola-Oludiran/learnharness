@@ -64,6 +64,7 @@
  */
 
 import { IdeaEvidence, stateTint, useEvidenceView } from "@/components/idea-evidence"; // fork (FORK.md)
+import { useColorMode } from "@/components/color-mode"; // fork: light mode (FORK.md)
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { NotesImportControl, NotesImportErrors, NotesImportNotices, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
@@ -1052,6 +1053,7 @@ export function GraphView({
 	}, [chainSelectOpen]);
 	// Fork (FORK.md): learner evidence, joined to the snapshot in this view.
 	const evidence = useEvidenceView(refreshTick);
+	const colorMode = useColorMode(); // fork (FORK.md, look 2)
 	useEffect(() => {
 		let cancelled = false;
 		fetch("/api/graph")
@@ -1411,7 +1413,7 @@ export function GraphView({
 			// Match the app typography (Geist via the body's stack).
 			fontFamily: getComputedStyle(document.body).fontFamily,
 		});
-	}, [snapshot, isEmpty, evidence]);
+	}, [snapshot, isEmpty, evidence, colorMode]); // fork (FORK.md, look 2): the canvas takes resolved colours, so a mode change re-reads them
 
 	// Feed #2 — settings: just marks the frame dirty. No rebuild, no
 	// re-layout, no camera touch (the whole point of the new renderer).
