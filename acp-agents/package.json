@@ -1,0 +1,9 @@
+{
+	"name": "learnharness-acp-agents",
+	"private": true,
+	"description": "The ACP adapters the app starts as child processes (fork, phase 6a). Installed into the app's server folder at build time by scripts/build-acp-payload.mjs; never imported by the app's own code.",
+	"dependencies": {
+		"@agentclientprotocol/claude-agent-acp": "0.106.0",
+		"@agentclientprotocol/codex-acp": "2.6.0"
+	}
+}

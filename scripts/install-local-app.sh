@@ -25,6 +25,9 @@ export NEXT_TELEMETRY_DISABLED=1
 npm run build
 node scripts/smoke-provider-runtime.mjs
 node scripts/build-server.mjs
+# The ACP adapters (Claude, Codex) are child processes, not imports: installed
+# beside the server from the pinned list in acp-agents/ (phase 6a).
+node scripts/build-acp-payload.mjs
 # The checkout's git folder must not be packaged: it is large, it is history,
 # and its read-only files make codesign fail. Done here, not in
 # next.config.ts, whose trace exclusions upstream pins exactly in a test.
