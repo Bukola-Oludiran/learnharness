@@ -33,7 +33,7 @@ interface Theme {
 	frame: number;
 	label: string;
 }
-const DARK: Theme = { background: 0x121212, frame: 0x6b6b6b, label: "rgba(255,255,255,0.7)" };
+const DARK: Theme = { background: 0x131b2c, frame: 0x4a5a7c, label: "rgba(230,236,247,0.75)" };
 const LIGHT: Theme = { background: 0xffffff, frame: 0x8a8a8a, label: "rgba(0,0,0,0.75)" };
 
 interface Label {

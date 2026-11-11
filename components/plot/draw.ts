@@ -15,7 +15,7 @@ export interface PlotTheme {
 	axis: string;
 	label: string;
 }
-export const DARK_THEME: PlotTheme = { background: "#121212", grid: "rgba(255,255,255,0.09)", axis: "rgba(255,255,255,0.55)", label: "rgba(255,255,255,0.6)" };
+export const DARK_THEME: PlotTheme = { background: "#131b2c", grid: "rgba(150,170,215,0.16)", axis: "rgba(230,236,247,0.6)", label: "rgba(230,236,247,0.65)" };
 export const LIGHT_THEME: PlotTheme = { background: "#ffffff", grid: "rgba(0,0,0,0.1)", axis: "rgba(0,0,0,0.7)", label: "rgba(0,0,0,0.65)" };
 
 /** How close to a vector's tip, in pixels, a press must be to take hold of it. */

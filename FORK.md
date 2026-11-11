@@ -51,6 +51,11 @@ Add one row per edit, in the same pull request that makes it.
 | `src/server/stores.ts`, `src/server/index.ts` | Wire `personaStore`; re-export `personas.ts`. | Tutors | 6b |
 | `src/server/chat-handler.ts` | `personaTurn` supplies the session's model in place of `record.settings` at both places it is resolved (the turn, and the settle-time compaction kick), refuses the turn by name when the tutor's model is unusable, and adds the tutor's segment to `extraSegments`. | Tutors | 6b |
 | `components/chat.tsx` | `TutorChip` in the session header. | Tutors | 6b |
+| `app/globals.css` | Dark token values replaced by the Ink and cobalt palette; new role tokens (`--lh-side`, `--lh-accent-soft`, `--lh-good/warn/bad` and their soft pairs) with Tailwind utilities; Tailwind's `green-500`, `amber-500`, `red-400` and `red-500` pointed at the role colours. | Look | L1 |
+| `components/sidebar.tsx` | Sidebar surface `bg-side`; the open session and the chosen filter are marked with `bg-accent-soft`. | Look | L1 |
+| `components/confidence-rail.tsx` | Its base colour reads `--background`. | Look | L1 |
+| `components/settings/appearance-section.tsx`, `tests/render-settings.test.tsx` | The background field's placeholder and hint name the new default, `#131b2c`; the test's pinned placeholder follows. | Look | L1 |
+| `electron/main.cjs` | The window's `backgroundColor` is the palette's background. | Look | L1 |
 | `src/agent/models.ts` | Imports `syncAcpProviders` and calls it in `piModels()`, which registers the two ACP providers and keeps their model lists current. | ACP agents | 6a |
 | `src/server/model-catalog.ts` | ACP providers: listed in `catalogProviders()` (usable or not), refused by `connectionModel` when unusable, unpriced and without context limits in `toModelDto` and `catalogContextLimits`. | ACP agents | 6a |
 | `src/server/keys.ts` | `providerKeyPresent` answers for ACP providers from `acpAvailable`. | ACP agents | 6a |
@@ -162,6 +167,8 @@ Add one row per edit, in the same pull request that makes it.
 - A tutor's name is put in its prompt (the learner may address it by name); the default tutor adds nothing. A tutor has no thinking level of its own: the session's, else the Settings one. Tutors affect teaching and practice turns and that session's own compaction; background roles are untouched. A new session cannot pick its tutor before its first message: it starts on its course's tutor or the default, and the header chip changes it from the next message. Switching leaves no note in the transcript.
 - The default tutor's "usable" flag only says a strong model is set and its provider is present. Deleting a session leaves its entry in `personas.json` until the next time any session's tutor is chosen.
 - The adapters are pinned in `acp-agents/package.json` and installed at build time with lifecycle scripts off; they are not in the app's own dependency tree, so `npm ci` and the test suite never fetch them. A checkout needs `npm ci` in `acp-agents/` (or `LH_ACP_AGENTS_DIR`) before `next dev` can use them.
+
+- The look (L1): the dark palette is Ink and cobalt (owner's choice, 2026-11-11), set as token values in `app/globals.css`. Colour has three jobs: `--primary` is the one accent (action, links, focus, selection); `accent-soft` marks what is active; good, warn and bad mark states. Upstream's own right/wrong marks are retinted by remapping the four Tailwind shades it uses, not by editing its components; the solid `green-600` button keeps Tailwind's shade so its white label stays readable. The Windows and Linux title bar overlay keeps upstream's near-black (the fork builds macOS only, and upstream's tests pin it). A custom background set in Appearance still derives its surfaces by upstream's additive grey curve, which loses the navy tint. Light mode is L2.
 
 ## Local app
 

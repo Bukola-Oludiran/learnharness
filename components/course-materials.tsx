@@ -97,7 +97,7 @@ export function MaterialRow({
 						{where ? ` · ${where}` : ""} ·{" "}
 						<span
 							data-testid="material-status"
-							className={cn(status.tone === "attention" && "text-foreground", status.tone === "problem" && "text-destructive")}
+							className={cn(status.tone === "attention" && "text-warn", status.tone === "problem" && "text-bad")}
 						>
 							{status.label}
 						</span>

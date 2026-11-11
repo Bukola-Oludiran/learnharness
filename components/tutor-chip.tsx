@@ -32,9 +32,9 @@ export function TutorMenuBody({
 			{personas.map((persona) => {
 				const selected = persona.id === current.persona.id;
 				return (
-					<button key={persona.id} type="button" role="menuitemradio" aria-checked={selected} data-testid="tutor-option" data-tutor={persona.id} onClick={() => onPick(persona.id)} className={cn(ITEM, selected && "bg-accent/60")}>
+					<button key={persona.id} type="button" role="menuitemradio" aria-checked={selected} data-testid="tutor-option" data-tutor={persona.id} onClick={() => onPick(persona.id)} className={cn(ITEM, selected && "bg-accent-soft text-primary")}>
 						<span className="min-w-0 flex-1 truncate">{persona.name}</span>
-						{!persona.usable && <span className="shrink-0 text-destructive">unavailable</span>}
+						{!persona.usable && <span className="shrink-0 text-bad">unavailable</span>}
 						{selected && <span className="shrink-0 text-muted-foreground">teaching</span>}
 					</button>
 				);
@@ -113,8 +113,8 @@ export function TutorChip({ chatId }: { chatId: string }) {
 				title={`${current.persona.name} is teaching this session${current.source === "course" ? " (the course’s tutor)" : ""}. Click to change.`}
 				onClick={() => setOpen((value) => !value)}
 				className={cn(
-					"flex max-w-44 items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-					!current.persona.usable && "border-destructive/50 text-destructive",
+					"flex max-w-44 items-center gap-1.5 rounded-md border border-transparent bg-accent-soft px-2 py-1 text-xs text-primary transition-colors hover:border-primary/50",
+					!current.persona.usable && "border-bad/50 bg-bad-soft text-bad",
 				)}
 			>
 				<GraduationCapIcon className="size-3.5 shrink-0" />

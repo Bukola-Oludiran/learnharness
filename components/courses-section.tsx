@@ -30,7 +30,7 @@ export function CourseRow({ course, active }: { course: CourseSummary; active: b
 			aria-current={active ? "page" : undefined}
 			className={cn(
 				"mb-0.5 flex w-full items-baseline gap-2 rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-accent",
-				active && "bg-accent",
+				active && "bg-accent-soft hover:bg-accent-soft",
 			)}
 		>
 			<span className="min-w-0 flex-1 truncate font-prose text-(length:--lh-prose-size)">{course.title}</span>
@@ -87,7 +87,7 @@ export function CoursesSection({ open }: { open: boolean }) {
 				aria-current={pathname === "/library" ? "page" : undefined}
 				className={cn(
 					"mx-3 mb-2 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-					pathname === "/library" && "bg-accent text-foreground",
+					pathname === "/library" && "bg-accent-soft text-primary hover:bg-accent-soft hover:text-primary",
 				)}
 			>
 				<LibraryIcon className="size-3" />
@@ -100,7 +100,7 @@ export function CoursesSection({ open }: { open: boolean }) {
 				aria-current={pathname === "/grapher" ? "page" : undefined}
 				className={cn(
 					"mx-3 mb-2 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-					pathname === "/grapher" && "bg-accent text-foreground",
+					pathname === "/grapher" && "bg-accent-soft text-primary hover:bg-accent-soft hover:text-primary",
 				)}
 			>
 				<ChartSplineIcon className="size-3" />
@@ -113,7 +113,7 @@ export function CoursesSection({ open }: { open: boolean }) {
 				aria-current={pathname === "/tutors" ? "page" : undefined}
 				className={cn(
 					"mx-3 mb-2 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-					pathname === "/tutors" && "bg-accent text-foreground",
+					pathname === "/tutors" && "bg-accent-soft text-primary hover:bg-accent-soft hover:text-primary",
 				)}
 			>
 				<GraduationCapIcon className="size-3" />

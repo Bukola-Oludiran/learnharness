@@ -197,7 +197,7 @@ export function Keypad({ onKey, initialTab = "main" }: { onKey: (key: Key) => vo
 						tabIndex={-1}
 						onMouseDown={keepFocus}
 						onClick={() => setTab(name)}
-						className={cn("flex-1 rounded-sm px-2 py-1 font-mono text-xs transition-colors", tab === name ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}
+						className={cn("flex-1 rounded-sm px-2 py-1 font-mono text-xs transition-colors", tab === name ? "bg-accent-soft text-primary" : "text-muted-foreground hover:text-foreground")}
 					>
 						{TAB_LABEL[name]}
 					</button>
