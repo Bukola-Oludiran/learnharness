@@ -38,6 +38,7 @@ import {
 } from "streamdown";
 import type { ExtraProps } from "streamdown";
 import { MERMAID_FONT_SIZE, renderMermaid } from "@/components/mermaid-render";
+import { useColorMode } from "@/components/color-mode"; // fork: light mode (FORK.md)
 import { MermaidError } from "@/components/mermaid-error";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { chartSize, useSessionMermaid } from "@/components/session-overlay";
@@ -144,6 +145,8 @@ function MermaidInline({ chart }: { chart: string }) {
 	const [attempt, setAttempt] = useState(0);
 	const overlay = useSessionMermaid();
 	const incomplete = useIsCodeFenceIncomplete();
+	// Fork (FORK.md, look 2): a diagram is drawn for one mode, so it is drawn again when the mode changes.
+	const mode = useColorMode();
 	// The font-parity cap (owner rule, 2026-09-19): the house CSS
 	// (`max-width: 100% !important`) overrides mermaid's own natural-size cap,
 	// so a chart would otherwise stretch to the full column and render its
@@ -176,7 +179,7 @@ function MermaidInline({ chart }: { chart: string }) {
 		return () => {
 			cancelled = true;
 		};
-	}, [chart, attempt, incomplete]);
+	}, [chart, attempt, incomplete, mode]);
 
 	if (incomplete || (svg === null && error === null)) {
 		return (

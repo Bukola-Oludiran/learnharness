@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useServerEvent, useServerResync } from "@/components/server-events";
+import { currentColorMode, useColorMode, type ColorMode } from "@/components/color-mode";
 import { cn } from "@/lib/utils";
 import type { EvidenceOutcome, EvidenceView, IdeaResult, IdeaState } from "@/src/core";
 
@@ -16,11 +17,14 @@ import type { EvidenceOutcome, EvidenceView, IdeaResult, IdeaState } from "@/src
 
 /** Map tints, as hex (the canvas renderer takes resolved colours). Ideas
  *  without results keep the map's own single colour. */
-export const STATE_TINT: Partial<Record<IdeaState, string>> = {
-	demonstrated: "#55d3a4",
-	shaky: "#f2c14e",
-	missed: "#ff8f85",
+const STATE_TINTS: Record<ColorMode, Partial<Record<IdeaState, string>>> = {
+	dark: { demonstrated: "#55d3a4", shaky: "#f2c14e", missed: "#ff8f85" },
+	light: { demonstrated: "#17805a", shaky: "#a8690c", missed: "#c2362f" },
 };
+/** The dark set: what a server render and the tests see. */
+export const STATE_TINT = STATE_TINTS.dark;
+/** The tints for the page's current mode. */
+export const stateTints = (mode: ColorMode = currentColorMode()) => STATE_TINTS[mode];
 
 const STATE_LABEL: Record<IdeaState, string> = {
 	unseen: "Unseen",
@@ -42,7 +46,7 @@ const ORIGIN_LABEL: Record<IdeaResult["from"], string> = { test: "Test", practic
 /** The tint for a map node, or undefined to keep the default colour. */
 export function stateTint(view: EvidenceView | null, nodeId: string): string | undefined {
 	const state = view?.states[nodeId];
-	return state ? STATE_TINT[state] : undefined;
+	return state ? stateTints()[state] : undefined;
 }
 
 /** The evidence view, refetched when the ledger or the graph changes. */
@@ -87,7 +91,7 @@ export function IdeaEvidence({ view, nodeId }: { view: EvidenceView | null; node
 	const state = view?.states[nodeId];
 	if (!view || !state) return null;
 	const results = view.results[nodeId] ?? [];
-	const tint = STATE_TINT[state];
+	const tint = stateTints(useColorMode())[state];
 	return (
 		<div className="mt-3 border-t border-border/60 pt-3" data-testid="idea-evidence" data-state={state}>
 			<div className="flex items-center gap-1.5 text-xs">

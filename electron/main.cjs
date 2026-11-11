@@ -55,6 +55,20 @@ app.setName(PRODUCT_NAME);
 const AUTH_FILE = () => path.join(app.getPath("userData"), "auth.json");
 const DATA_DIR = () => path.join(app.getPath("userData"), "data");
 
+/** Fork (FORK.md, look 2): the colour the window shows before the page has painted — the palette's
+ *  background in the mode saved in Settings, so launch and live resize never flash the other mode. */
+function windowBackground() {
+	try {
+		const settings = JSON.parse(fs.readFileSync(path.join(DATA_DIR(), "settings.json"), "utf-8"));
+		const appearance = settings && settings.appearance;
+		if (appearance && typeof appearance.background === "string" && /^#[0-9a-fA-F]{6}$/.test(appearance.background)) return appearance.background;
+		if (appearance && appearance.mode === "light") return "#f6f8fb";
+	} catch {
+		// no settings yet: the default mode
+	}
+	return "#131b2c";
+}
+
 /** The packaged standalone server (extraResources → Resources/server).
  *  In dev LH_DEV_URL short-circuits everything: no spawn, no packaging —
  *  the window points at the running `next dev` server (full HMR). */
@@ -327,7 +341,7 @@ function createWindow(url) {
 		// The app background (#141414) fills the lag instead. `show: false` +
 		// ready-to-show is the same treatment for first paint: the window
 		// appears only once the page has actually rendered.
-		backgroundColor: "#131b2c", // fork (FORK.md, look 1): the palette's background, so launch does not flash near-black
+		backgroundColor: windowBackground(), // fork (FORK.md, looks 1 and 2): the palette's background in the saved mode
 		show: false,
 		// Narrow-window behavior (owner, 2026-09-17): 640px is the floor —
 		// below it even a wrapped chrome row gets cramped and the chat header

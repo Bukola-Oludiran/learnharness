@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import {
 	blendMatrix, curve3, DEFAULT_BOX, formatEntry, implicitMesh, spanBasis, niceStep, parameterRanges, paramSurfaceMesh, PLOT_COLORS, resolvePlot, surfaceMesh, tickLabel, ticks, type Mesh, type PlotBox, type PlotDoc, type Point3,
 } from "@/src/core";
+import { currentColorMode, useColorMode } from "@/components/color-mode";
 import { vectorLabel } from "./draw";
 import type { PlotCanvasHandle } from "./plot-canvas";
 
@@ -307,7 +308,7 @@ const Plot3D = forwardRef<PlotCanvasHandle, { doc: PlotDoc; wheelZoom?: boolean;
 			}
 		};
 		const stage: Stage = {
-			renderer, scene, camera, controls, content, frame, labels: [], lineMaterials: [], theme: DARK,
+			renderer, scene, camera, controls, content, frame, labels: [], lineMaterials: [], theme: currentColorMode() === "light" ? LIGHT : DARK,
 			render: () => {
 				scene.background = new THREE.Color(stage.theme.background);
 				(frame.material as THREE.LineBasicMaterial).color.set(stage.theme.frame);
@@ -359,6 +360,15 @@ const Plot3D = forwardRef<PlotCanvasHandle, { doc: PlotDoc; wheelZoom?: boolean;
 		if (stage) stage.controls.enableZoom = wheelZoom;
 	}, [wheelZoom]);
 
+	// The page's mode changed: repaint in its colours.
+	const mode = useColorMode();
+	useEffect(() => {
+		const stage = stageRef.current;
+		if (!stage) return;
+		stage.theme = mode === "light" ? LIGHT : DARK;
+		stage.render();
+	}, [mode]);
+
 	// The document changed: resample and redraw, keeping the camera where it is.
 	useEffect(() => {
 		const stage = stageRef.current;
@@ -392,7 +402,7 @@ const Plot3D = forwardRef<PlotCanvasHandle, { doc: PlotDoc; wheelZoom?: boolean;
 						ctx.scale(scale, scale);
 						stage.drawLabels?.(ctx, width / scale, height / scale, LIGHT);
 					}
-					stage.theme = DARK;
+					stage.theme = currentColorMode() === "light" ? LIGHT : DARK;
 					stage.render();
 					if (!ctx) return resolve(null);
 					out.toBlob((blob) => resolve(blob), "image/png");

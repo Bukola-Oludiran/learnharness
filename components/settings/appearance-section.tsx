@@ -184,21 +184,25 @@ export function AppearanceSection({
 		};
 	}, [fontMenuOpen]);
 
+	// Fork (FORK.md, look 2): this section's own saved mode first, as its other fields read.
+	const mode = appearance?.mode ?? resolved.mode;
 	return (
 		<>
-			<SettingsRow label="Mode" hint="Coming soon" testid="row-mode" dimmed>
-				<ThinSelect value="dark" ariaLabel="mode" onChange={() => {}} testid="select-mode" disabled>
+			{/* Fork (FORK.md, look 2): the mode switch works; upstream shipped it disabled. */}
+			<SettingsRow label="Mode" hint={mode === "light" ? "Light" : "Dark"} testid="row-mode">
+				<ThinSelect value={mode} ariaLabel="mode" onChange={(next) => onSectionChange({ ...appearance, mode: next === "light" ? "light" : "dark" })} testid="select-mode">
 					<option value="dark">Dark</option>
+					<option value="light">Light</option>
 				</ThinSelect>
 			</SettingsRow>
 			<SettingsRow
 				label="Background"
-				hint={`Empty = ${resolved.background ?? "#131b2c"}`}
+				hint={`Empty = ${resolved.background ?? (mode === "light" ? "#f6f8fb" : "#131b2c")}`}
 				testid="row-background"
 			>
 				<CommitInput
 					value={appearance?.background ?? ""}
-					placeholder="#131b2c"
+					placeholder={mode === "light" ? "#f6f8fb" : "#131b2c"}
 					ariaLabel="background hex"
 					testid="input-background"
 					onCommit={(v) => onSectionChange({ ...appearance, background: v === "" ? null : v })}

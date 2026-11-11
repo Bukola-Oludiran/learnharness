@@ -287,12 +287,16 @@ describe("KeysSection (thin SSR)", () => {
 });
 
 describe("AppearanceSection (thin SSR)", () => {
-	it("mode is rendered DISABLED — dark-only this wave, no lying control", () => {
+	// Fork (FORK.md, look 2): upstream pinned this control DISABLED ("dark-only this wave"); the fork's light mode enables it.
+	it("mode is a working choice of dark or light, dark by default", () => {
 		const html = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />);
-		assert.ok(tagOf(html, "select-mode").includes("disabled"), "mode select disabled");
-		assert.ok(html.includes("Coming soon"));
-		// The whole row dims, graph-view style (the control never adds its own).
-		assert.ok(tagOf(html, "row-mode").includes("opacity-40"), "mode row dims whole");
+		assert.ok(!tagOf(html, "select-mode").includes("disabled"), "mode select enabled");
+		assert.ok(!html.includes("Coming soon"));
+		assert.ok(!tagOf(html, "row-mode").includes("opacity-40"), "mode row is not dimmed");
+		assert.match(html, /<option value="dark" selected="">Dark<\/option><option value="light">Light<\/option>/);
+		const light = renderToStaticMarkup(<AppearanceSection appearance={{ mode: "light" }} onSectionChange={() => {}} />);
+		assert.match(light, /<option value="light" selected="">Light<\/option>/);
+		assert.ok(light.includes(`placeholder="#f6f8fb"`), "the background field names the light default");
 	});
 
 	it("hex inputs carry the factory placeholders; prose size resolves against the factory", () => {
