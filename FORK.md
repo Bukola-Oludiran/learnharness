@@ -43,6 +43,15 @@ Add one row per edit, in the same pull request that makes it.
 | `package.json`, `package-lock.json` | Dependency `three` and dev dependency `@types/three`. | 3D grapher | 5c |
 | `package.json`, `package-lock.json`, `.gitignore` | Dependency `mathlive`; `public/mathlive/` (its copied fonts) ignored. | Maths editor | 5c3 |
 | `.gitignore` | Ignores `public/excalidraw/` (the copied fonts). | Canvas | 5a |
+| `config.ts` | `ACP_MODELS_FILE`. | ACP agents | 6a |
+| `src/agent/models.ts` | Imports `syncAcpProviders` and calls it in `piModels()`, which registers the two ACP providers and keeps their model lists current. | ACP agents | 6a |
+| `src/server/model-catalog.ts` | ACP providers: listed in `catalogProviders()` (usable or not), refused by `connectionModel` when unusable, unpriced and without context limits in `toModelDto` and `catalogContextLimits`. | ACP agents | 6a |
+| `src/server/keys.ts` | `providerKeyPresent` answers for ACP providers from `acpAvailable`. | ACP agents | 6a |
+| `src/server/pricing.ts` | `catalogModel` returns nothing for an ACP model, so no dollar estimate is made. | ACP agents | 6a |
+| `tests/pricing-native-parity.test.ts` | The every-model pricing check expects no price for `acp-*` providers, as it does for `claude-code`. | ACP agents | 6a |
+| `src/agent/tools/send-to-user.ts` | `sendToUserApplies` also holds for the `acp-claude` provider (its model ids do not contain "claude"). | ACP agents | 6a |
+| `src/core/index.ts` | Re-exports `contracts/acp.ts`. | ACP agents | 6a |
+| `components/settings/model-menu.tsx` | An ACP model's price reads "Plan billing". | ACP agents | 6a |
 | `src/core/contracts.ts` | Re-exports `contracts/course.ts`, `contracts/material.ts` and `contracts/evidence.ts`. | Courses, materials, evidence | 1, 3a, 3b |
 | `src/core/ports.ts` | `CourseStore`, `MaterialStore`, `EvidenceStore` and `CanvasStore` interfaces and their record imports. | Courses, materials, evidence, canvas | 1, 3a, 3b, 5a |
 | `src/core/events.ts` | `courses-changed`, `materials-changed` and `evidence-changed` in `ServerEvents` and `SERVER_EVENT_TYPES`. | Courses, materials, evidence | 1, 3a, 3b |
@@ -138,6 +147,11 @@ Add one row per edit, in the same pull request that makes it.
 - Drawing on the canvas element is not covered by the node tests; the grapher was smoke-tested in headless Chrome (every curve kind, pan, zoom, sliders, persistence, and the answer flow).
 - A build can sweep the checkout's `.git` folder into `.next/standalone` (it did in 5b, and codesign failed on its read-only files). `scripts/install-local-app.sh` removes `.git` and `.github` from the standalone before packaging. Upstream pins `outputFileTracingExcludes` exactly in `tests/provider-tracing.test.ts`, so the exclusion is not made in `next.config.ts`.
 - Vision transcription usage is not written to any usage log (upstream's notes pipeline logs its own extraction usage on the source record).
+
+- ACP agents (phase 6a, `src/agent/acp/`, described in `docs/acp-agents.md`): Claude and Codex as two more model providers, each on its own subscription sign-in, started as child processes and given only LearnHarness's tool bridge. They are used as models (LearnHarness keeps its loop), on the pattern of upstream's Claude Code provider, three of whose modules they import unedited (`live-processes.ts`, `reuse-context.ts`, `transcript.ts`). The doc's stdio shim was not needed: both adapters accept the loopback HTTP bridge.
+- Codex's isolation is softer than Claude's: its file-edit tool cannot be switched off, so it rests on read-only mode and the app refusing permission. Codex also keeps its own base instructions under the tutor's prompt. Each agent read one test image correctly through the provider; a full photo-answer lesson has not been run on either.
+- There is no setting to switch an ACP agent off, no status display, and no personas yet (phase 6b). Background roles can be pointed at an ACP model in Settings like any other; nothing does so by default. Token counts come from the agent's own report and include its cached prompt; the context meter shows no limit for these models.
+- The adapters are pinned in `acp-agents/package.json` and installed at build time with lifecycle scripts off; they are not in the app's own dependency tree, so `npm ci` and the test suite never fetch them. A checkout needs `npm ci` in `acp-agents/` (or `LH_ACP_AGENTS_DIR`) before `next dev` can use them.
 
 ## Local app
 

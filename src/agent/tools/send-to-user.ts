@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { SEND_TO_USER_TOOL } from "../../core/native-messages.ts";
 import { CLAUDE_CODE_PROVIDER } from "../claude-code/constants.ts";
+import { ACP_CLAUDE_PROVIDER } from "../../core/contracts/acp.ts"; // fork: ACP agents (FORK.md)
 import { serverExecute } from "../tool-execute.ts";
 
 /** One availability rule for the tool and its teacher-only delivery guard.
@@ -12,7 +13,7 @@ export function sendToUserApplies(
 	toolsOverridden: boolean,
 ): boolean {
 	return (kind === "prober" || kind === "teacher") && !toolsOverridden &&
-		(model.provider === CLAUDE_CODE_PROVIDER || model.id.toLowerCase().includes("claude"));
+		(model.provider === CLAUDE_CODE_PROVIDER || model.provider === ACP_CLAUDE_PROVIDER || model.id.toLowerCase().includes("claude"));
 }
 
 const sendToUserInput = Type.Object({

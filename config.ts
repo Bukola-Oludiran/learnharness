@@ -123,6 +123,10 @@ export const GRAPH_FORMAT_FILE = path.join(PATHS.graph, "format.json");
  */
 export const SETTINGS_FILE = path.join(DATA_ROOT, "settings.json");
 
+/** The models each ACP agent last reported for this account (fork — see
+ *  FORK.md): a cache the model menus read; safe to delete. */
+export const ACP_MODELS_FILE = path.join(DATA_ROOT, "acp-models.json");
+
 /**
  * User prompt-override files (settings-storage wave, 2026-09-19): the
  * per-segment system-prompt overrides mirroring the SOURCE layout
