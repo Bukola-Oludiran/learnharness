@@ -61,6 +61,9 @@ export interface CourseRecord {
 	/** Library books the course teaches from (phase 4b). A book is shared:
 	 *  it lives in the library and may serve several courses. */
 	bookIds?: string[];
+	/** The course's tutor (phase 6b): a tutor id from personas.json. Absent, or naming a tutor since
+	 *  deleted, means the default tutor. A session may choose its own over this. */
+	personaId?: string;
 	syllabus?: Syllabus;
 	/** Why the last syllabus build failed; cleared by the next build. */
 	syllabusError?: string;

@@ -9,6 +9,7 @@ import { CourseSyllabus } from "@/components/course-syllabus";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import { SessionRow } from "@/components/sidebar";
 import { TopBar } from "@/components/top-bar";
+import { CourseTutorSelect } from "@/components/tutor-chip";
 import { Input } from "@/components/ui/input";
 import { fuzzyScore, type ChatListItem, type CourseRecord } from "@/src/core";
 
@@ -294,6 +295,8 @@ export function CourseHome({ initialCourse }: { initialCourse: CourseRecord }) {
 				<h1 data-testid="course-title" className="min-w-0 truncate font-title text-3xl tracking-tight">
 					{course.title}
 				</h1>
+				<div className="min-w-4 flex-1" aria-hidden="true" />
+				<CourseTutorSelect courseId={course.id} personaId={course.personaId} />
 			</TopBar>
 			<div className="min-h-0 flex-1 overflow-y-auto">
 				<CourseHomeBody

@@ -34,6 +34,7 @@ import { collectToolCallIds } from "./pi/call-ids.ts";
 import { providerEventNote } from "../agent/provider-events.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 import { courseContextFor } from "./courses.ts";
+import { personaTurn } from "./personas.ts"; // fork: tutors (FORK.md)
 import { answerImagePool } from "./canvases.ts"; // fork: canvas outlines (FORK.md)
 import { materialToolsFor } from "./material-tools.ts"; // fork: the tutor's material tools (FORK.md)
 import { hasPhotoAnswers, PHOTO_ANSWER_RULE } from "../core/attachments.ts";
@@ -240,7 +241,10 @@ export async function handleChatInput(
 	// write-ahead persist (nothing durable changes), and every downstream
 	// resolution (jobs/extraction gate per-need on their own tiers).
 	const effective = effectiveSettings();
-	const conversation = resolveConversationSpec(record.settings, effective.models.strong);
+	// Fork (FORK.md): the session's tutor supplies the model in place of the
+	// session's own setting, and one more prompt segment further down.
+	const tutor = personaTurn(chatId, record.settings);
+	const conversation = resolveConversationSpec(tutor.settings, effective.models.strong);
 	if (!conversation) {
 		const envelope = modelsNotConfigured(["strong"]);
 		console.info(`[chat ${chatId}] turn refused — ${JSON.stringify(envelope)}`);
@@ -261,6 +265,11 @@ export async function handleChatInput(
 		if (input.type === "steers" && !connectionBackgroundAllowed(conversation.provider)) {
 			return Response.json({ error: "Background use is off for this connection. Automatic follow-up remains deferred in its queue." }, { status: 403 });
 		}
+	}
+	// Fork (FORK.md): a tutor whose model cannot be used says so by name; no other tutor is quietly substituted.
+	if (tutor.unavailable) {
+		console.info(`[chat ${chatId}] turn refused — ${tutor.unavailable}`);
+		return Response.json({ error: tutor.unavailable }, { status: 503 });
 	}
 	if (!providerKeyPresent(conversation.provider)) {
 		const envelope = providerKeyMissingEnvelope(conversation.provider, ["strong"]);
@@ -469,7 +478,7 @@ export async function handleChatInput(
 		// Fork (FORK.md): per-session prompt segments, resolved per turn — the
 		// course context (so the chat record needs no course field) and the
 		// photo rule, present only once the session holds a photo answer.
-		extraSegments: [courseContextFor(chatId), hasPhotoAnswers(agentMessages) ? PHOTO_ANSWER_RULE : undefined]
+		extraSegments: [courseContextFor(chatId), hasPhotoAnswers(agentMessages) ? PHOTO_ANSWER_RULE : undefined, tutor.segment]
 			.filter((segment): segment is string => segment !== undefined),
 		imageSnapshots: answerImagePool(chatId, record.imageSnapshots),
 		extraTools: materialToolsFor(chatId),
@@ -665,7 +674,7 @@ export async function handleChatInput(
 				if (process.env.NODE_ENV !== "test" && (!requestCycle || requestCycle.dispatched))
 					kickCompaction(() => {
 						const fresh = effectiveSettings();
-						const spec = resolveConversationSpec(stores.chatStore.getChat(chatId)?.settings, fresh.models.strong);
+						const spec = resolveConversationSpec(personaTurn(chatId, stores.chatStore.getChat(chatId)?.settings).settings, fresh.models.strong);
 						if (!spec || !connectionBackgroundAllowed(spec.provider)) return null;
 						let kickEngine: PiEngine;
 						try { kickEngine = piEngineForSpec(spec, true, undefined, retentionForSlot("strong")); } catch { return null; }

@@ -127,6 +127,9 @@ export const SETTINGS_FILE = path.join(DATA_ROOT, "settings.json");
  *  FORK.md): a cache the model menus read; safe to delete. */
 export const ACP_MODELS_FILE = path.join(DATA_ROOT, "acp-models.json");
 
+/** The tutors and each session's choice of one (fork — see FORK.md). */
+export const PERSONAS_FILE = path.join(DATA_ROOT, "personas.json");
+
 /**
  * User prompt-override files (settings-storage wave, 2026-09-19): the
  * per-segment system-prompt overrides mirroring the SOURCE layout
