@@ -216,7 +216,7 @@ export function UnitRow({
 					<span className="block font-prose text-(length:--lh-prose-size)">
 						{unit.title}
 						{status && (
-							<span data-testid="syllabus-unit-status" className="ml-2 text-xs text-muted-foreground">
+							<span data-testid="syllabus-unit-status" className={cn("ml-2 text-xs text-muted-foreground", unit.status === "covered" && "text-good", unit.status === "active" && "text-warn")}>
 								{status}
 							</span>
 						)}

@@ -35,7 +35,7 @@ export const CONFIDENCE_COLORS: readonly string[] = [
 export function confidenceRailStyle(value: number): CSSProperties {
 	const color = CONFIDENCE_COLORS[CONFIDENCE_STOPS.indexOf(value)] ?? CONFIDENCE_COLORS[2]!;
 	return {
-		backgroundColor: "#141414",
+		backgroundColor: "var(--background)", // fork (FORK.md, look 1): follows the palette
 		backgroundImage: [
 			`linear-gradient(90deg, ${color} 0%, ${color} ${value}%, transparent ${value}%, transparent 100%)`,
 			...[30, 50, 70, 90].map(

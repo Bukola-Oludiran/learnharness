@@ -51,7 +51,7 @@ export function AngleSwitch({ degrees, onDegrees }: { degrees: boolean; onDegree
 					data-testid={option ? "plot-angles-deg" : "plot-angles-rad"}
 					aria-pressed={degrees === option}
 					onClick={() => onDegrees(option)}
-					className={cn("px-3 py-1.5 transition-colors", degrees === option ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}
+					className={cn("px-3 py-1.5 transition-colors", degrees === option ? "bg-accent-soft text-primary" : "text-muted-foreground hover:text-foreground")}
 				>
 					{option ? "deg" : "rad"}
 				</button>
@@ -74,7 +74,7 @@ export function ModeSwitch({ mode, onMode }: { mode: PlotMode; onMode: (mode: Pl
 					data-testid={`plot-mode-${option}`}
 					aria-pressed={mode === option}
 					onClick={() => onMode(option)}
-					className={cn("flex-1 px-3 py-1.5 transition-colors", mode === option ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}
+					className={cn("flex-1 px-3 py-1.5 transition-colors", mode === option ? "bg-accent-soft text-primary" : "text-muted-foreground hover:text-foreground")}
 				>
 					{option}
 				</button>
@@ -439,7 +439,7 @@ export function Grapher({ doc, onChange, canvasRef, className }: { doc: PlotDoc;
 						title={keypad ? "Hide the keypad" : "Show the scientific keypad"}
 						onMouseDown={(event) => event.preventDefault()}
 						onClick={toggleKeypad}
-						className={cn("flex items-center border-l border-border px-3 transition-colors hover:bg-accent hover:text-foreground", keypad ? "bg-accent text-foreground" : "text-muted-foreground")}
+						className={cn("flex items-center border-l border-border px-3 transition-colors hover:bg-accent hover:text-foreground", keypad ? "bg-accent-soft text-primary" : "text-muted-foreground")}
 					>
 						<KeyboardIcon className="size-4" />
 					</button>

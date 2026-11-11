@@ -17,9 +17,9 @@ import type { EvidenceOutcome, EvidenceView, IdeaResult, IdeaState } from "@/src
 /** Map tints, as hex (the canvas renderer takes resolved colours). Ideas
  *  without results keep the map's own single colour. */
 export const STATE_TINT: Partial<Record<IdeaState, string>> = {
-	demonstrated: "#3fb37f",
-	shaky: "#d9a441",
-	missed: "#d95c5c",
+	demonstrated: "#55d3a4",
+	shaky: "#f2c14e",
+	missed: "#ff8f85",
 };
 
 const STATE_LABEL: Record<IdeaState, string> = {
@@ -109,9 +109,9 @@ export function IdeaEvidence({ view, nodeId }: { view: EvidenceView | null; node
 								<span
 									className={cn(
 										"shrink-0 font-medium",
-										result.outcome === "correct" && "text-green-500",
-										result.outcome === "partial" && "text-amber-500",
-										result.outcome === "wrong" && "text-red-500",
+										result.outcome === "correct" && "text-good",
+										result.outcome === "partial" && "text-warn",
+										result.outcome === "wrong" && "text-bad",
 									)}
 								>
 									{OUTCOME_LABEL[result.outcome]}

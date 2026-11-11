@@ -327,7 +327,7 @@ function createWindow(url) {
 		// The app background (#141414) fills the lag instead. `show: false` +
 		// ready-to-show is the same treatment for first paint: the window
 		// appears only once the page has actually rendered.
-		backgroundColor: "#141414",
+		backgroundColor: "#131b2c", // fork (FORK.md, look 1): the palette's background, so launch does not flash near-black
 		show: false,
 		// Narrow-window behavior (owner, 2026-09-17): 640px is the floor —
 		// below it even a wrapped chrome row gets cramped and the chat header

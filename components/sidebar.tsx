@@ -312,7 +312,7 @@ export function SessionRow({
 			data-testid={kbdSelected ? "session-row-kbd" : "session-row"}
 			className={cn(
 				"relative mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent",
-				active && "bg-accent",
+				active && "bg-accent-soft hover:bg-accent-soft", // fork (FORK.md, look 1): the open session is marked in the accent
 				kbdSelected && !active && "bg-accent/60 ring-1 ring-border",
 			)}
 		>
@@ -653,7 +653,7 @@ function SessionsSidebar() {
 			className={cn("sidebar-motion shrink-0 overflow-hidden duration-200", open ? "w-72" : "w-0")}
 			aria-hidden={!open}
 		>
-			<div className="flex h-full w-72 flex-col border-r bg-background">
+			<div className="flex h-full w-72 flex-col border-r bg-side">
 				{/* LH wordmark — the owner's header; close toggle sits at the edge.
 				    Merged chrome (2026-09-17): in Electron this band is the
 				    window's drag surface and starts after the traffic lights
@@ -803,7 +803,7 @@ function SessionsSidebar() {
 							className={cn(
 								"flex-1 rounded-sm px-2 py-1 text-[11px] uppercase tracking-wider transition-colors",
 								kindFilter === f
-									? "bg-accent text-foreground"
+									? "bg-accent-soft text-primary"
 									: "text-muted-foreground hover:text-foreground",
 							)}
 						>
