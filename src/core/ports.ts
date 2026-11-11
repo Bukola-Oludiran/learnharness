@@ -16,6 +16,7 @@ import type {
 	ChatSettings,
 	ChatSummary,
 	CourseRecord,
+	PersonasFile,
 	MaterialRecord,
 	Evidence,
 	TestReading,
@@ -142,6 +143,18 @@ export interface CanvasStore {
 	readScene(chatId: string, snapshotId: string): string | null;
 	/** snapshot id → outline and kind, for every drawing or graph of the session that has one. */
 	readOutlines(chatId: string): Record<string, { kind: CanvasKind; outline: string }>;
+}
+
+// ─── PersonaStore — tutors (personas.json; fork, see FORK.md) ───────────────
+
+/** One file: every tutor and each session's own choice. Whole-file read and
+ *  replace; which tutor teaches a turn is the server service's rule
+ *  (src/server/personas.ts), not the store's. */
+export interface PersonaStore {
+	/** The file as stored. A missing file reads as the starter tutors with no session choices. */
+	read(): PersonasFile;
+	/** Replace the file. */
+	write(file: PersonasFile): void;
 }
 
 // ─── EvidenceStore — learner evidence (graph/evidence.jsonl; fork) ──────────

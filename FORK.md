@@ -44,6 +44,13 @@ Add one row per edit, in the same pull request that makes it.
 | `package.json`, `package-lock.json`, `.gitignore` | Dependency `mathlive`; `public/mathlive/` (its copied fonts) ignored. | Maths editor | 5c3 |
 | `.gitignore` | Ignores `public/excalidraw/` (the copied fonts). | Canvas | 5a |
 | `config.ts` | `ACP_MODELS_FILE`. | ACP agents | 6a |
+| `config.ts` | `PERSONAS_FILE`. | Tutors | 6b |
+| `src/core/ports.ts` | `PersonaStore`. | Tutors | 6b |
+| `src/core/contracts.ts`, `src/core/index.ts` | Re-export `contracts/persona.ts` and `persona.ts`. | Tutors | 6b |
+| `src/core/events.ts` | `personas-changed` in `ServerEvents` and `SERVER_EVENT_TYPES`. | Tutors | 6b |
+| `src/server/stores.ts`, `src/server/index.ts` | Wire `personaStore`; re-export `personas.ts`. | Tutors | 6b |
+| `src/server/chat-handler.ts` | `personaTurn` supplies the session's model in place of `record.settings` at both places it is resolved (the turn, and the settle-time compaction kick), refuses the turn by name when the tutor's model is unusable, and adds the tutor's segment to `extraSegments`. | Tutors | 6b |
+| `components/chat.tsx` | `TutorChip` in the session header. | Tutors | 6b |
 | `src/agent/models.ts` | Imports `syncAcpProviders` and calls it in `piModels()`, which registers the two ACP providers and keeps their model lists current. | ACP agents | 6a |
 | `src/server/model-catalog.ts` | ACP providers: listed in `catalogProviders()` (usable or not), refused by `connectionModel` when unusable, unpriced and without context limits in `toModelDto` and `catalogContextLimits`. | ACP agents | 6a |
 | `src/server/keys.ts` | `providerKeyPresent` answers for ACP providers from `acpAvailable`. | ACP agents | 6a |
@@ -150,7 +157,10 @@ Add one row per edit, in the same pull request that makes it.
 
 - ACP agents (phase 6a, `src/agent/acp/`, described in `docs/acp-agents.md`): Claude and Codex as two more model providers, each on its own subscription sign-in, started as child processes and given only LearnHarness's tool bridge. They are used as models (LearnHarness keeps its loop), on the pattern of upstream's Claude Code provider, three of whose modules they import unedited (`live-processes.ts`, `reuse-context.ts`, `transcript.ts`). The doc's stdio shim was not needed: both adapters accept the loopback HTTP bridge.
 - Codex's isolation is softer than Claude's: its file-edit tool cannot be switched off, so it rests on read-only mode and the app refusing permission. Codex also keeps its own base instructions under the tutor's prompt. Each agent read one test image correctly through the provider; a full photo-answer lesson has not been run on either.
-- There is no setting to switch an ACP agent off, no status display, and no personas yet (phase 6b). Background roles can be pointed at an ACP model in Settings like any other; nothing does so by default. Token counts come from the agent's own report and include its cached prompt; the context meter shows no limit for these models.
+- There is no setting to switch an ACP agent off and no status display beyond the Tutors page's "unavailable now" mark. Background roles can be pointed at an ACP model in Settings like any other; nothing does so by default. Token counts come from the agent's own report and include its cached prompt; the context meter shows no limit for these models.
+- Tutors (phase 6b; "persona" in the architecture doc and in the code): a name, a model pin and an overlay, kept with each session's own choice in `personas.json`; a course's tutor is `CourseRecord.personaId`. Chosen fresh each turn: the session's choice, then its course's tutor, then the default tutor, which is not a record but the Settings strong slot with no overlay. A tutor resolves to upstream's per-session model setting (`ChatSettings.model`, whose own UI upstream retired) plus one prompt segment, so nothing below the turn handler knows tutors exist. A session's own `settings.model` on an old record is overridden while a tutor applies.
+- A tutor's name is put in its prompt (the learner may address it by name); the default tutor adds nothing. A tutor has no thinking level of its own: the session's, else the Settings one. Tutors affect teaching and practice turns and that session's own compaction; background roles are untouched. A new session cannot pick its tutor before its first message: it starts on its course's tutor or the default, and the header chip changes it from the next message. Switching leaves no note in the transcript.
+- The default tutor's "usable" flag only says a strong model is set and its provider is present. Deleting a session leaves its entry in `personas.json` until the next time any session's tutor is chosen.
 - The adapters are pinned in `acp-agents/package.json` and installed at build time with lifecycle scripts off; they are not in the app's own dependency tree, so `npm ci` and the test suite never fetch them. A checkout needs `npm ci` in `acp-agents/` (or `LH_ACP_AGENTS_DIR`) before `next dev` can use them.
 
 ## Local app

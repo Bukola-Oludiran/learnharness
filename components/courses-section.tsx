@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ChartSplineIcon, LibraryIcon, PlusIcon } from "lucide-react";
+import { ChartSplineIcon, GraduationCapIcon, LibraryIcon, PlusIcon } from "lucide-react";
 import { CourseFormDialog } from "@/components/course-dialogs";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import { cn } from "@/lib/utils";
@@ -105,6 +105,19 @@ export function CoursesSection({ open }: { open: boolean }) {
 			>
 				<ChartSplineIcon className="size-3" />
 				Grapher
+			</Link>
+			{/* Tutors (phase 6b): who teaches, on which model, and how. */}
+			<Link
+				href="/tutors"
+				data-testid="tutors-link"
+				aria-current={pathname === "/tutors" ? "page" : undefined}
+				className={cn(
+					"mx-3 mb-2 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+					pathname === "/tutors" && "bg-accent text-foreground",
+				)}
+			>
+				<GraduationCapIcon className="size-3" />
+				Tutors
 			</Link>
 			<div className="mx-3 mb-1 flex items-center justify-between">
 				<span className="text-xs uppercase tracking-widest text-muted-foreground/70">Courses</span>
